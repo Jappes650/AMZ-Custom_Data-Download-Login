@@ -26,7 +26,14 @@ jobs:
 
     - name: Build executable
       run: |
-        pyinstaller --onefile --windowed --name AmazonOrderProcessor Amazon_seller_selenium.py
+        pyinstaller --onefile --windowed --name AmazonOrderProcessor ^
+        --hidden-import='selenium.webdriver.common' ^
+        --hidden-import='selenium.webdriver.chrome.service' ^
+        --hidden-import='selenium.webdriver.support' ^
+        --hidden-import='webdriver_manager' ^
+        --add-data="amazon_cookies.pkl;." ^
+        --add-data="amazon_session_info.json;." ^
+        Amazon_seller_selenium.py
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
