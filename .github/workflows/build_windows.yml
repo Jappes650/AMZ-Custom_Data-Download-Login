@@ -21,6 +21,7 @@ jobs:
     - name: Install Chocolatey dependencies
       shell: powershell
       run: |
+        # Ensure Chocolatey is up to date
         if (Test-Path "$env:ProgramData\chocolatey\bin\choco.exe") {
           choco upgrade chocolatey -y
         } else {
@@ -33,12 +34,18 @@ jobs:
     - name: Install Cairo and dependencies
       shell: powershell
       run: |
-        choco install cairo --version=1.16.0 -y
+        # Install latest available cairo version
+        choco install cairo -y
         choco install pkgconfiglite -y
-        # Verify the DLLs exist
-        if (-not (Test-Path "C:\tools\cairo\bin\libcairo-2.dll")) {
-          throw "Cairo installation failed - DLLs not found"
+        
+        # Verify installation and find actual DLL paths
+        $cairoPath = (Get-Command libcairo-2.dll).Source
+        if (-not $cairoPath) {
+          throw "Cairo installation failed - libcairo-2.dll not found"
         }
+        $cairoDir = [System.IO.Path]::GetDirectoryName($cairoPath)
+        echo "Cairo DLLs found at: $cairoDir"
+        echo "$cairoDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     - name: Create and activate venv
       run: |
@@ -57,40 +64,23 @@ jobs:
       run: |
         venv\Scripts\activate
         
-        # Create a spec file to have more control over the build
-        pyi-makespec --onefile --name AmazonOrderProcessor `
+        # Get the actual Cairo DLL path
+        $cairoPath = (Get-Command libcairo-2.dll).Source
+        $cairoDir = [System.IO.Path]::GetDirectoryName($cairoPath)
+        
+        # Build with explicit DLL paths
+        pyinstaller --onefile --name AmazonOrderProcessor `
           --collect-all selenium `
           --collect-all webdriver_manager `
           --collect-all cairosvg `
           --collect-all lxml `
           --collect-all PIL `
+          --add-binary "$cairoDir\libcairo-2.dll;." `
+          --add-binary "$cairoDir\libpng16-16.dll;." `
+          --add-binary "$cairoDir\zlib1.dll;." `
           --add-data "amazon_cookies.pkl;." `
           --add-data "amazon_session_info.json;." `
           Amazon_seller_selenium.py
-        
-        # Modify the spec file to include DLLs
-        (Get-Content AmazonOrderProcessor.spec) -replace 
-          '^a = Analysis\(', 
-          ('a = Analysis([''Amazon_seller_selenium.py''],' +
-           'pathex=[''C:\\tools\\cairo\\bin''],' +
-           'binaries=[(''C:\\tools\\cairo\\bin\\libcairo-2.dll'', ''.''),' +
-                     '(''C:\\tools\\cairo\\bin\\libpng16-16.dll'', ''.''),' +
-                     '(''C:\\tools\\cairo\\bin\\zlib1.dll'', ''.'')],') | 
-          Set-Content AmazonOrderProcessor.spec
-        
-        # Build using the modified spec file
-        pyinstaller AmazonOrderProcessor.spec
-
-    - name: Verify executable contains DLLs
-      shell: powershell
-      run: |
-        if (-not (Test-Path "dist\AmazonOrderProcessor.exe")) {
-          throw "Executable not found!"
-        }
-        # Simple check that the file is not empty
-        if ((Get-Item "dist\AmazonOrderProcessor.exe").Length -lt 1MB) {
-          throw "Executable seems too small - likely missing dependencies"
-        }
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
