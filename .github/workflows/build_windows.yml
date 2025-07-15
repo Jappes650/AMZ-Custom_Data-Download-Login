@@ -1,4 +1,4 @@
-name: Build Windows Executable
+name: Build Windows Executable with Cairo
 
 on:
   push:
@@ -11,24 +11,56 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
         python-version: '3.11'
+      
+    - name: Install Chocolatey (for Cairo)
+      shell: powershell
+      run: |
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        refreshenv
+        
+    - name: Install Cairo and dependencies
+      shell: powershell
+      run: |
+        choco install cairo --version=1.16.0 -y
+        choco install pkgconfiglite -y
+        refreshenv
+        echo "C:\tools\cairo\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-    - name: Install dependencies
+    - name: Create and activate venv
+      run: |
+        python -m venv venv
+        venv\Scripts\activate
+        
+    - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
+        pip install wheel
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Build executable
-      run: pyinstaller --onefile --windowed --name AmazonOrderProcessor --hidden-import selenium.webdriver.common --hidden-import selenium.webdriver.chrome.service --hidden-import selenium.webdriver.support --hidden-import webdriver_manager --hidden-import cairosvg --hidden-import lxml --hidden-import PIL --add-data "amazon_cookies.pkl;." --add-data "amazon_session_info.json;." Amazon_seller_selenium.py
+    - name: Build executable with PyInstaller
+      run: |
+        venv\Scripts\activate
+        pyinstaller --onefile --name AmazonOrderProcessor `
+        --collect-all selenium `
+        --collect-all webdriver_manager `
+        --collect-all cairosvg `
+        --collect-all lxml `
+        --collect-all PIL `
+        --add-data "amazon_cookies.pkl;." `
+        --add-data "amazon_session_info.json;." `
+        Amazon_seller_selenium.py
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
       with:
         name: AmazonOrderProcessor
         path: dist/AmazonOrderProcessor.exe
