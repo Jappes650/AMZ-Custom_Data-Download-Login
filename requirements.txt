@@ -1,7 +1,7 @@
 selenium==4.9.1
 webdriver-manager==3.8.6
 Pillow==10.0.1
+cairocffi==1.6.1
 cairosvg==2.7.1
 lxml==4.9.3
 pyinstaller==6.2.0
-pywin32==306
