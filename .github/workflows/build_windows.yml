@@ -42,9 +42,14 @@ jobs:
     - name: Install Python dependencies
       run: pip install -r requirements.txt
 
-    - name: Verify installation
-      run: |
-        7z --help
-        pkg-config --version
-        python --version
-        pip list
+    - name: Build EXE with PyInstaller
+      run: pyinstaller --onefile --add-data "amazon_cookies.pkl;." --add-data "amazon_session_info.json;." Amazon_seller_selenium.py
+
+    - name: List EXE output
+      run: dir dist
+
+    - name: Upload EXE as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: amazon-seller-exe
+        path: dist/*.exe
