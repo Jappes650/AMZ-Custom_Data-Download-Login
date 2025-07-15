@@ -26,11 +26,14 @@ jobs:
 
     - name: Build executable
       run: |
-        pyinstaller --onefile --windowed --name AmazonOrderProcessor ^
+        ppyinstaller --onefile --windowed --name AmazonOrderProcessor ^
         --hidden-import='selenium.webdriver.common' ^
         --hidden-import='selenium.webdriver.chrome.service' ^
         --hidden-import='selenium.webdriver.support' ^
         --hidden-import='webdriver_manager' ^
+        --hidden-import='cairosvg' ^
+        --hidden-import='lxml' ^
+        --hidden-import='PIL' ^
         --add-data="amazon_cookies.pkl;." ^
         --add-data="amazon_session_info.json;." ^
         Amazon_seller_selenium.py
