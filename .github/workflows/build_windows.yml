@@ -18,20 +18,26 @@ jobs:
       with:
         python-version: '3.11'
       
-    - name: Install Chocolatey (for Cairo)
+    - name: Install Chocolatey dependencies
       shell: powershell
       run: |
-        Set-ExecutionPolicy Bypass -Scope Process -Force
-        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-        refreshenv
+        # Ensure Chocolatey is up to date
+        if (Test-Path "$env:ProgramData\chocolatey\bin\choco.exe") {
+          choco upgrade chocolatey -y
+        } else {
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+          iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        }
+        
+        # Refresh environment variables
+        Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
         
     - name: Install Cairo and dependencies
       shell: powershell
       run: |
         choco install cairo --version=1.16.0 -y
         choco install pkgconfiglite -y
-        refreshenv
         echo "C:\tools\cairo\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     - name: Create and activate venv
