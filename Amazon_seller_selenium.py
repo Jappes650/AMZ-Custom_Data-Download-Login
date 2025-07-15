@@ -33,8 +33,8 @@ def resource_path(relative_path):
 
 
 # === Globale Variablen ===
-COOKIE_FILE = "amazon_cookies.pkl"
-SESSION_FILE = "amazon_session_info.json"
+COOKIE_FILE = resource_path("amazon_cookies.pkl")
+SESSION_FILE = resource_path("amazon_session_info.json")
 LOGIN_URL = "https://sellercentral.amazon.de"
 SEARCH_FIELD_SELECTOR = 'input#sc-search-field.search-input.search-input-active'
 SEARCH_BUTTON_SELECTOR = 'button.sc-search-button.search-icon-container'
@@ -50,6 +50,14 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 # === Selenium Setup ===
 def create_driver():
+    # ChromeDriver-Service Setup für PyInstaller
+    if getattr(sys, 'frozen', False):
+        # Im eingefrorenen Zustand (EXE)
+        service = Service(executable_path=ChromeDriverManager().install())
+    else:
+        # Im Entwicklungsmodus
+        service = Service(ChromeDriverManager().install())
+
     chrome_options = Options()
     chrome_options.add_experimental_option("prefs", {
         "profile.default_content_setting_values.notifications": 2,
