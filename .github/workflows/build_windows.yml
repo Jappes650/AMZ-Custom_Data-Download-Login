@@ -17,41 +17,26 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-      
-    - name: Install Chocolatey dependencies
+
+    - name: Install Cairo manually
       shell: powershell
       run: |
-        # Ensure Chocolatey is up to date
-        if (Test-Path "$env:ProgramData\chocolatey\bin\choco.exe") {
-          choco upgrade chocolatey -y
-        } else {
-          Set-ExecutionPolicy Bypass -Scope Process -Force
-          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-          iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-        }
-        Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
-        
-    - name: Install Cairo and dependencies
+        # Download and extract Cairo
+        $url = "https://github.com/preshing/cairo-windows/releases/download/v1.17.2/cairo-1.17.2-windows.zip"
+        Invoke-WebRequest -Uri $url -OutFile cairo.zip
+        Expand-Archive -Path cairo.zip -DestinationPath C:\cairo
+        echo "C:\cairo\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    - name: Install pkg-config (required for cairocffi)
       shell: powershell
       run: |
-        # Install latest available cairo version
-        choco install cairo -y
         choco install pkgconfiglite -y
-        
-        # Verify installation and find actual DLL paths
-        $cairoPath = (Get-Command libcairo-2.dll).Source
-        if (-not $cairoPath) {
-          throw "Cairo installation failed - libcairo-2.dll not found"
-        }
-        $cairoDir = [System.IO.Path]::GetDirectoryName($cairoPath)
-        echo "Cairo DLLs found at: $cairoDir"
-        echo "$cairoDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     - name: Create and activate venv
       run: |
         python -m venv venv
         venv\Scripts\activate
-        
+
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
@@ -63,21 +48,15 @@ jobs:
       shell: powershell
       run: |
         venv\Scripts\activate
-        
-        # Get the actual Cairo DLL path
-        $cairoPath = (Get-Command libcairo-2.dll).Source
-        $cairoDir = [System.IO.Path]::GetDirectoryName($cairoPath)
-        
-        # Build with explicit DLL paths
         pyinstaller --onefile --name AmazonOrderProcessor `
           --collect-all selenium `
           --collect-all webdriver_manager `
           --collect-all cairosvg `
           --collect-all lxml `
           --collect-all PIL `
-          --add-binary "$cairoDir\libcairo-2.dll;." `
-          --add-binary "$cairoDir\libpng16-16.dll;." `
-          --add-binary "$cairoDir\zlib1.dll;." `
+          --add-binary "C:\cairo\bin\libcairo-2.dll;." `
+          --add-binary "C:\cairo\bin\libpng16-16.dll;." `
+          --add-binary "C:\cairo\bin\zlib1.dll;." `
           --add-data "amazon_cookies.pkl;." `
           --add-data "amazon_session_info.json;." `
           Amazon_seller_selenium.py
