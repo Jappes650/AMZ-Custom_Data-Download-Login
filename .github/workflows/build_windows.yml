@@ -18,16 +18,20 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install Cairo manually
+    - name: Install GTK3 (includes Cairo)
       shell: powershell
       run: |
-        # Download and extract Cairo
-        $url = "https://github.com/preshing/cairo-windows/releases/download/v1.17.2/cairo-1.17.2-windows.zip"
-        Invoke-WebRequest -Uri $url -OutFile cairo.zip
-        Expand-Archive -Path cairo.zip -DestinationPath C:\cairo
-        echo "C:\cairo\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        # Install GTK3 which includes Cairo
+        choco install gtksharp -y
+        # Add GTK3 bin directory to PATH (where Cairo DLLs are located)
+        $gtkPath = "C:\Program Files\GtkSharp\2.12\bin"
+        if (Test-Path $gtkPath) {
+          echo "$gtkPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        } else {
+          throw "GTK installation failed - path not found"
+        }
 
-    - name: Install pkg-config (required for cairocffi)
+    - name: Install pkg-config
       shell: powershell
       run: |
         choco install pkgconfiglite -y
@@ -54,12 +58,24 @@ jobs:
           --collect-all cairosvg `
           --collect-all lxml `
           --collect-all PIL `
-          --add-binary "C:\cairo\bin\libcairo-2.dll;." `
-          --add-binary "C:\cairo\bin\libpng16-16.dll;." `
-          --add-binary "C:\cairo\bin\zlib1.dll;." `
+          --add-binary "C:\Program Files\GtkSharp\2.12\bin\libcairo-2.dll;." `
+          --add-binary "C:\Program Files\GtkSharp\2.12\bin\libpng16-16.dll;." `
+          --add-binary "C:\Program Files\GtkSharp\2.12\bin\zlib1.dll;." `
           --add-data "amazon_cookies.pkl;." `
           --add-data "amazon_session_info.json;." `
           Amazon_seller_selenium.py
+
+    - name: Verify DLLs are included
+      shell: powershell
+      run: |
+        if (-not (Test-Path "dist\AmazonOrderProcessor.exe")) {
+          throw "Executable not found!"
+        }
+        # Check file size as a basic verification
+        $fileSize = (Get-Item "dist\AmazonOrderProcessor.exe").Length
+        if ($fileSize -lt 5MB) {
+          throw "Executable seems too small - likely missing dependencies"
+        }
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
