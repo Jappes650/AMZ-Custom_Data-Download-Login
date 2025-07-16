@@ -96,6 +96,7 @@ jobs:
           --add-data "amazon_cookies.pkl;." `
           --add-data "amazon_session_info.json;." `
           --add-binary "cairo_dlls\*.dll;." `
+          --add-data "C:\Users\runneradmin\.wdm\drivers\chromedriver\win64\*;wdm_cache" `
           --hidden-import cairocffi `
           --hidden-import cairosvg `
           --hidden-import cairocffi._ffi `
