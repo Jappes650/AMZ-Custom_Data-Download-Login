@@ -91,9 +91,6 @@ jobs:
     - name: Build EXE with PyInstaller
       shell: pwsh
       run: |
-        # Install ChromeDriver first
-        python -c "from webdriver_manager.chrome import ChromeDriverManager; ChromeDriverManager().install()"
-    
         # Build with comprehensive Cairo support
         pyinstaller --onefile `
           --add-data "amazon_cookies.pkl;." `
