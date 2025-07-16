@@ -53,7 +53,8 @@ def create_driver():
     # Configure webdriver manager settings
     if getattr(sys, 'frozen', False):
         # Running in PyInstaller bundle
-        cache_dir = os.path.join(sys._MEIPASS, 'wdm_cache')
+        cache_dir = os.path.join(os.path.expanduser('~'), '.wdm')
+        os.makedirs(cache_dir, exist_ok=True)
         os.environ['WDM_LOCAL'] = '1'
         os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
         os.environ['WDM_LOG_LEVEL'] = '0'
@@ -62,8 +63,15 @@ def create_driver():
         # Running in normal Python environment
         os.environ['WDM_LOCAL'] = '1'
 
-    # Install ChromeDriver
-    driver_path = ChromeDriverManager().install()
+    try:
+        # Install ChromeDriver with retry logic
+        driver_path = ChromeDriverManager().install()
+    except Exception as e:
+        # Fallback to user's home directory if first attempt fails
+        cache_dir = os.path.join(os.path.expanduser('~'), '.wdm')
+        os.makedirs(cache_dir, exist_ok=True)
+        os.environ['WDM_CACHE_DIR'] = cache_dir
+        driver_path = ChromeDriverManager().install()
 
     chrome_options = Options()
     chrome_options.add_experimental_option("prefs", {
@@ -83,6 +91,7 @@ def create_driver():
     driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
+
 
 # === Session-Info speichern ===
 def save_session_info(driver):
