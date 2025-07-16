@@ -1,6 +1,5 @@
 selenium==4.34.2
 webdriver-manager==4.0.2
-tkinter==0.1.0
 pillow==11.3.0
 cairocffi==1.7.1
 CairoSVG==2.8.2
