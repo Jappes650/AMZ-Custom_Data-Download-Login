@@ -50,18 +50,23 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 # === Selenium Setup ===
 def create_driver():
-    # ChromeDriver-Service Setup für PyInstaller
+    # Set up temp directory for webdriver manager in PyInstaller environment
     if getattr(sys, 'frozen', False):
-        # Im eingefrorenen Zustand (EXE)
-        service = Service(executable_path=ChromeDriverManager().install())
+        # Running in PyInstaller bundle
+        temp_dir = os.path.join(sys._MEIPASS, 'wdm_cache')
+        os.makedirs(temp_dir, exist_ok=True)
+        os.environ['WDM_LOCAL'] = '1'
+        os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
+        os.environ['WDM_LOG_LEVEL'] = '0'
+        driver_path = ChromeDriverManager(path=temp_dir).install()
     else:
-        # Im Entwicklungsmodus
-        service = Service(ChromeDriverManager().install())
+        # Running in normal Python environment
+        driver_path = ChromeDriverManager().install()
 
     chrome_options = Options()
     chrome_options.add_experimental_option("prefs", {
         "profile.default_content_setting_values.notifications": 2,
-        "download.default_directory": DOWNLOAD_DIR,  # Set custom download directory
+        "download.default_directory": DOWNLOAD_DIR,
         "download.prompt_for_download": False,
         "download.directory_upgrade": True,
         "safebrowsing.enabled": True
@@ -72,7 +77,9 @@ def create_driver():
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
     
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+    # Use the installed driver path
+    service = Service(driver_path)
+    driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
 
