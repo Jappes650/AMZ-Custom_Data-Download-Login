@@ -50,18 +50,20 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 # === Selenium Setup ===
 def create_driver():
-    # Set up temp directory for webdriver manager in PyInstaller environment
+    # Configure webdriver manager settings
     if getattr(sys, 'frozen', False):
         # Running in PyInstaller bundle
-        temp_dir = os.path.join(sys._MEIPASS, 'wdm_cache')
-        os.makedirs(temp_dir, exist_ok=True)
+        cache_dir = os.path.join(sys._MEIPASS, 'wdm_cache')
         os.environ['WDM_LOCAL'] = '1'
         os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
         os.environ['WDM_LOG_LEVEL'] = '0'
-        driver_path = ChromeDriverManager(path=temp_dir).install()
+        os.environ['WDM_CACHE_DIR'] = cache_dir
     else:
         # Running in normal Python environment
-        driver_path = ChromeDriverManager().install()
+        os.environ['WDM_LOCAL'] = '1'
+
+    # Install ChromeDriver
+    driver_path = ChromeDriverManager().install()
 
     chrome_options = Options()
     chrome_options.add_experimental_option("prefs", {
@@ -77,7 +79,6 @@ def create_driver():
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
     
-    # Use the installed driver path
     service = Service(driver_path)
     driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
