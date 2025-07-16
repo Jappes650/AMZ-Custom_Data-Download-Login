@@ -45,36 +45,61 @@ jobs:
     - name: Install Python dependencies
       run: pip install -r requirements.txt
 
-    - name: Download Cairo DLLs
+    - name: Download and setup Cairo DLLs
       shell: pwsh
       run: |
         # Create a folder for Cairo DLLs
         New-Item -ItemType Directory -Force -Path "cairo_dlls"
         
-        # Download Cairo DLLs from a reliable source
-        $cairoDlls = @(
-            "https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer/releases/download/2022-01-04/gtk3-runtime-3.24.31-2022-01-04-ts-win64.exe"
-        )
+        # Download Cairo DLLs directly from a reliable source
+        $cairoUrl = "https://github.com/preshing/cairo-windows/releases/download/1.17.2/cairo-windows-1.17.2.zip"
+        Invoke-WebRequest -Uri $cairoUrl -OutFile "cairo-windows.zip"
         
-        # Alternative: Use conda-forge Cairo
-        conda install -c conda-forge cairo || echo "Conda install failed, trying alternative"
+        # Extract Cairo DLLs
+        Expand-Archive -Path "cairo-windows.zip" -DestinationPath "cairo_extract"
         
-        # Copy system Cairo DLLs if available
+        # Copy necessary DLLs
+        if (Test-Path "cairo_extract\cairo-windows-1.17.2\lib\x64") {
+            Copy-Item "cairo_extract\cairo-windows-1.17.2\lib\x64\*.dll" -Destination "cairo_dlls\" -Force
+        }
+        
+        # Also try to copy from GTK installation if available
         if (Test-Path "C:\tools\gtk\bin\libcairo-2.dll") {
             Copy-Item "C:\tools\gtk\bin\libcairo*.dll" -Destination "cairo_dlls\" -Force
         }
+        
+        # List what we have
+        Write-Host "Cairo DLLs found:"
+        Get-ChildItem -Path "cairo_dlls" -ErrorAction SilentlyContinue
 
     - name: Build EXE with PyInstaller (with Cairo support)
+      shell: pwsh
       run: |
-        pyinstaller --onefile ^
-          --add-data "amazon_cookies.pkl;." ^
-          --add-data "amazon_session_info.json;." ^
-          --add-binary "cairo_dlls\*.dll;." ^
-          --hidden-import cairocffi ^
-          --hidden-import cairosvg ^
-          --collect-all cairocffi ^
-          --collect-all cairosvg ^
-          Amazon_seller_selenium.py
+        # Check if Cairo DLLs exist
+        $cairoDlls = Get-ChildItem -Path "cairo_dlls\*.dll" -ErrorAction SilentlyContinue
+        
+        if ($cairoDlls) {
+            Write-Host "Building with Cairo DLLs..."
+            pyinstaller --onefile `
+              --add-data "amazon_cookies.pkl;." `
+              --add-data "amazon_session_info.json;." `
+              --add-binary "cairo_dlls\*.dll;." `
+              --hidden-import cairocffi `
+              --hidden-import cairosvg `
+              --collect-all cairocffi `
+              --collect-all cairosvg `
+              Amazon_seller_selenium.py
+        } else {
+            Write-Host "No Cairo DLLs found, building without Cairo binaries..."
+            pyinstaller --onefile `
+              --add-data "amazon_cookies.pkl;." `
+              --add-data "amazon_session_info.json;." `
+              --hidden-import cairocffi `
+              --hidden-import cairosvg `
+              --collect-all cairocffi `
+              --collect-all cairosvg `
+              Amazon_seller_selenium.py
+        }
 
     - name: List EXE output
       run: dir dist
