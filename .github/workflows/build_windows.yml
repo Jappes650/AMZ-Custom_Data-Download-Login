@@ -91,6 +91,10 @@ jobs:
     - name: Build EXE with PyInstaller
       shell: pwsh
       run: |
+        # Create cache directory for webdriver-manager
+        $cacheDir = "$env:USERPROFILE\.wdm"
+        New-Item -ItemType Directory -Force -Path $cacheDir
+    
         # Build with comprehensive Cairo support
         pyinstaller --onefile `
           --add-data "amazon_cookies.pkl;." `
