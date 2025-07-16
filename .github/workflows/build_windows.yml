@@ -91,12 +91,14 @@ jobs:
     - name: Build EXE with PyInstaller
       shell: pwsh
       run: |
+        # Install ChromeDriver first
+        python -c "from webdriver_manager.chrome import ChromeDriverManager; ChromeDriverManager().install()"
+    
         # Build with comprehensive Cairo support
         pyinstaller --onefile `
           --add-data "amazon_cookies.pkl;." `
           --add-data "amazon_session_info.json;." `
           --add-binary "cairo_dlls\*.dll;." `
-          --add-data "C:\Users\runneradmin\.wdm\drivers\chromedriver\win64\*;wdm_cache" `
           --hidden-import cairocffi `
           --hidden-import cairosvg `
           --hidden-import cairocffi._ffi `
@@ -107,7 +109,6 @@ jobs:
           --collect-submodules cairosvg `
           --paths "C:\tools\msys64\mingw64\bin" `
           --paths "C:\tools\msys64\usr\bin" `
-          --add-data "C:\tools\msys64\mingw64\bin\*.dll;." `
           Amazon_seller_selenium.py
 
     - name: List EXE output
