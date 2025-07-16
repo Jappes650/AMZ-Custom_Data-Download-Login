@@ -88,6 +88,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    - name: Pre-download ChromeDriver
+      shell: pwsh
+      run: |
+        # Pre-download ChromeDriver to avoid runtime issues
+        python -c "from webdriver_manager.chrome import ChromeDriverManager; ChromeDriverManager().install()"    
+
     - name: Build EXE with PyInstaller
       shell: pwsh
       run: |
