@@ -104,6 +104,9 @@ jobs:
           --collect-all cairosvg `
           --collect-submodules cairocffi `
           --collect-submodules cairosvg `
+          --paths "C:\tools\msys64\mingw64\bin" `
+          --paths "C:\tools\msys64\usr\bin" `
+          --add-data "C:\tools\msys64\mingw64\bin\*.dll;." `
           Amazon_seller_selenium.py
 
     - name: List EXE output
