@@ -7,9 +7,11 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('drivers/chromedriver.exe', 'drivers'),  # <- Hier wird chromedriver eingebunden
+        ('drivers/chromedriver.exe', 'drivers'),
+        ('amazon_cookies.pkl', '.'), 
+        ('amazon_session_info.json', '.')
     ],
-    hiddenimports=[],
+    hiddenimports=['cairosvg', 'PIL'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
