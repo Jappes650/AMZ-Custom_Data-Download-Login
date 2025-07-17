@@ -68,8 +68,9 @@ def create_driver():
         # Use ChromeDriverManager if local driver doesn't exist
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
-    # Stealth: Remove "webdriver" from navigator
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined}")
+    # Stealth: Remove "webdriver" from navigator (fixed JavaScript syntax)
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    
     return driver
 
 # === Session-Info speichern ===
@@ -220,27 +221,43 @@ def manual_login():
             "- Drücke erst dann OK"
         )
         
-        # Vereinfachte Login-Prüfung
+        # Wait for user to complete login (with timeout)
+        try:
+            WebDriverWait(driver, 300).until(  # 5 minute timeout
+                lambda d: not any(keyword in d.current_url.lower() for keyword in ["signin", "login", "auth"])
+            )
+            login_success = True
+        except:
+            login_success = False
+        
+        # Detailed login verification
         current_url = driver.current_url
         print(f"URL nach Login: {current_url}")
         
-        # Wenn wir nicht mehr auf Login-Seite sind, als erfolgreich werten
-        if not any(keyword in current_url.lower() for keyword in ["signin", "login", "auth"]):
+        if login_success or not any(keyword in current_url.lower() for keyword in ["signin", "login", "auth"]):
+            # Successful login case
             if save_cookies(driver):
                 messagebox.showinfo("Erfolg", "Login-Cookies wurden erfolgreich gespeichert!")
             else:
                 messagebox.showerror("Fehler", "Cookies konnten nicht gespeichert werden.")
         else:
-            # Auch wenn Login-Seite erkannt wird, trotzdem versuchen Cookies zu speichern
+            # Partial login case - still try to save cookies
             if save_cookies(driver):
-                messagebox.showinfo("Cookies gespeichert", "Cookies wurden gespeichert. Teste die Suche um zu prüfen ob der Login funktioniert.")
+                messagebox.showinfo("Cookies gespeichert", 
+                    "Cookies wurden gespeichert. Teste die Suche um zu prüfen ob der Login funktioniert.\n\n"
+                    "Hinweis: Der Login scheint nicht vollständig zu sein. Falls Probleme auftreten, bitte erneut versuchen.")
             else:
-                messagebox.showwarning("Warnung", "Login scheint nicht vollständig zu sein. Bitte versuche es erneut.")
+                messagebox.showwarning("Warnung", 
+                    "Login scheint nicht vollständig zu sein und Cookies konnten nicht gespeichert werden.\n"
+                    "Bitte versuche es erneut und stelle sicher, dass du komplett eingeloggt bist.")
             
     except Exception as e:
-        messagebox.showerror("Fehler", f"Login fehlgeschlagen: {e}")
+        messagebox.showerror("Fehler", f"Login fehlgeschlagen: {str(e)}")
     finally:
-        driver.quit()
+        try:
+            driver.quit()
+        except:
+            pass
 
 
 # === Verarbeite heruntergeladene ZIP-Datei ===
