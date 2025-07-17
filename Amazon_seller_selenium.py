@@ -94,20 +94,48 @@ def load_session_info():
 # === Cookies speichern ===
 def save_cookies(driver):
     try:
+        # Verify we can write to the directory
+        test_file = os.path.join(SCRIPT_DIR, "test_write.tmp")
+        try:
+            with open(test_file, "w") as f:
+                f.write("test")
+            os.remove(test_file)
+        except Exception as e:
+            print(f"Cannot write to directory: {str(e)}")
+            return False
+
+        # Get and filter cookies
         cookies = driver.get_cookies()
-        # Filtere nur relevante Cookies für Amazon
-        relevant_cookies = []
-        for cookie in cookies:
-            if any(domain in cookie.get('domain', '') for domain in ['amazon.de', 'amazon.com', 'sellercentral']):
-                relevant_cookies.append(cookie)
+        print(f"Found {len(cookies)} cookies total")
         
-        with open(COOKIE_FILE, "wb") as file:
-            pickle.dump(relevant_cookies, file)
+        relevant_cookies = [
+            cookie for cookie in cookies 
+            if any(domain in cookie.get('domain', '') 
+                for domain in ['amazon.de', 'amazon.com', 'sellercentral'])
+        ]
         
-        save_session_info(driver)
-        return True
+        print(f"Filtered to {len(relevant_cookies)} relevant cookies")
+        
+        if not relevant_cookies:
+            print("No relevant cookies found to save")
+            return False
+            
+        # Save cookies
+        try:
+            with open(COOKIE_FILE, "wb") as file:
+                pickle.dump(relevant_cookies, file)
+            print(f"Cookies saved to {os.path.abspath(COOKIE_FILE)}")
+            
+            # Save session info
+            save_session_info(driver)
+            return True
+            
+        except Exception as e:
+            print(f"Error saving cookies: {str(e)}")
+            return False
+            
     except Exception as e:
-        print(f"Fehler beim Speichern der Cookies: {e}")
+        print(f"Exception in save_cookies: {str(e)}")
         return False
 
 # === Cookies laden ===
@@ -207,9 +235,9 @@ def is_logged_in(driver):
 
 # === Login durchführen (manuell) ===
 def manual_login():
-    driver = create_driver()
-    
+    driver = None
     try:
+        driver = create_driver()
         driver.get(LOGIN_URL)
         
         messagebox.showinfo(
@@ -221,43 +249,42 @@ def manual_login():
             "- Drücke erst dann OK"
         )
         
-        # Wait for user to complete login (with timeout)
+        # Wait for login completion with proper verification
+        login_success = False
         try:
-            WebDriverWait(driver, 300).until(  # 5 minute timeout
-                lambda d: not any(keyword in d.current_url.lower() for keyword in ["signin", "login", "auth"])
+            WebDriverWait(driver, 300).until(
+                lambda d: is_logged_in(d)  # Use the proper login check
             )
             login_success = True
-        except:
-            login_success = False
+        except Exception as e:
+            print(f"Login wait timeout/error: {str(e)}")
+            login_success = is_logged_in(driver)  # Final check
+            
+        # Debug output
+        print(f"Final login status: {login_success}")
+        print(f"Current URL: {driver.current_url}")
         
-        # Detailed login verification
-        current_url = driver.current_url
-        print(f"URL nach Login: {current_url}")
-        
-        if login_success or not any(keyword in current_url.lower() for keyword in ["signin", "login", "auth"]):
-            # Successful login case
-            if save_cookies(driver):
-                messagebox.showinfo("Erfolg", "Login-Cookies wurden erfolgreich gespeichert!")
+        # Save cookies with detailed feedback
+        if save_cookies(driver):
+            if login_success:
+                messagebox.showinfo("Erfolg", "Login erfolgreich & Cookies gespeichert!")
             else:
-                messagebox.showerror("Fehler", "Cookies konnten nicht gespeichert werden.")
+                messagebox.showwarning("Hinweis", 
+                    "Cookies gespeichert, aber Login-Status unsicher.\n"
+                    "Bitte die Suche testen.")
         else:
-            # Partial login case - still try to save cookies
-            if save_cookies(driver):
-                messagebox.showinfo("Cookies gespeichert", 
-                    "Cookies wurden gespeichert. Teste die Suche um zu prüfen ob der Login funktioniert.\n\n"
-                    "Hinweis: Der Login scheint nicht vollständig zu sein. Falls Probleme auftreten, bitte erneut versuchen.")
-            else:
-                messagebox.showwarning("Warnung", 
-                    "Login scheint nicht vollständig zu sein und Cookies konnten nicht gespeichert werden.\n"
-                    "Bitte versuche es erneut und stelle sicher, dass du komplett eingeloggt bist.")
+            messagebox.showerror("Fehler", "Cookies konnten NICHT gespeichert werden!")
             
     except Exception as e:
-        messagebox.showerror("Fehler", f"Login fehlgeschlagen: {str(e)}")
+        messagebox.showerror("Kritischer Fehler", f"Login-Prozess fehlgeschlagen: {str(e)}")
     finally:
-        try:
-            driver.quit()
-        except:
-            pass
+        if driver:
+            try:
+                print("Closing browser...")
+                driver.quit()
+                print("Browser closed successfully")
+            except Exception as e:
+                print(f"Error closing browser: {str(e)}")
 
 
 # === Verarbeite heruntergeladene ZIP-Datei ===
