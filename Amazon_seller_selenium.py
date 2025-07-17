@@ -52,8 +52,9 @@ if not os.path.exists(DOWNLOAD_DIR):
 def create_driver():
     # Configure webdriver manager settings
     if getattr(sys, 'frozen', False):
-        # Running in PyInstaller bundle
-        cache_dir = os.path.join(os.path.expanduser('~'), '.wdm')
+        # Running in PyInstaller bundle - use user's home directory for cache
+        home_dir = os.path.expanduser('~')
+        cache_dir = os.path.join(home_dir, '.wdm')
         os.makedirs(cache_dir, exist_ok=True)
         os.environ['WDM_LOCAL'] = '1'
         os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
@@ -68,7 +69,8 @@ def create_driver():
         driver_path = ChromeDriverManager().install()
     except Exception as e:
         # Fallback to user's home directory if first attempt fails
-        cache_dir = os.path.join(os.path.expanduser('~'), '.wdm')
+        home_dir = os.path.expanduser('~')
+        cache_dir = os.path.join(home_dir, '.wdm')
         os.makedirs(cache_dir, exist_ok=True)
         os.environ['WDM_CACHE_DIR'] = cache_dir
         driver_path = ChromeDriverManager().install()
@@ -89,7 +91,7 @@ def create_driver():
     
     service = Service(driver_path)
     driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined}")
     return driver
 
 
