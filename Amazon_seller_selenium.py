@@ -53,44 +53,55 @@ def create_driver():
     # Configure webdriver manager settings
     if getattr(sys, 'frozen', False):
         # Running in PyInstaller bundle
-        cache_dir = os.path.join(os.path.expanduser('~'), '.wdm')
-        os.makedirs(cache_dir, exist_ok=True)
-        os.environ['WDM_LOCAL'] = '1'
-        os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
-        os.environ['WDM_LOG_LEVEL'] = '0'
-        os.environ['WDM_CACHE_DIR'] = cache_dir
+        base_path = sys._MEIPASS
+        driver_path = os.path.join(base_path, "chromedriver.exe")
+        chrome_options = Options()
+        chrome_options.add_experimental_option("prefs", {
+            "profile.default_content_setting_values.notifications": 2,
+            "download.default_directory": DOWNLOAD_DIR,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True
+        })
+        chrome_options.add_argument("--start-maximized")
+        chrome_options.add_argument(f"--user-agent={USER_AGENT}")
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        
+        service = Service(executable_path=driver_path)
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        return driver
     else:
         # Running in normal Python environment
         os.environ['WDM_LOCAL'] = '1'
+        try:
+            driver_path = ChromeDriverManager().install()
+        except Exception as e:
+            cache_dir = os.path.join(os.path.expanduser('~'), '.wdm')
+            os.makedirs(cache_dir, exist_ok=True)
+            os.environ['WDM_CACHE_DIR'] = cache_dir
+            driver_path = ChromeDriverManager().install()
 
-    try:
-        # Install ChromeDriver with retry logic
-        driver_path = ChromeDriverManager().install()
-    except Exception as e:
-        # Fallback to user's home directory if first attempt fails
-        cache_dir = os.path.join(os.path.expanduser('~'), '.wdm')
-        os.makedirs(cache_dir, exist_ok=True)
-        os.environ['WDM_CACHE_DIR'] = cache_dir
-        driver_path = ChromeDriverManager().install()
-
-    chrome_options = Options()
-    chrome_options.add_experimental_option("prefs", {
-        "profile.default_content_setting_values.notifications": 2,
-        "download.default_directory": DOWNLOAD_DIR,
-        "download.prompt_for_download": False,
-        "download.directory_upgrade": True,
-        "safebrowsing.enabled": True
-    })
-    chrome_options.add_argument("--start-maximized")
-    chrome_options.add_argument(f"--user-agent={USER_AGENT}")
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-    
-    service = Service(driver_path)
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-    return driver
+        chrome_options = Options()
+        chrome_options.add_experimental_option("prefs", {
+            "profile.default_content_setting_values.notifications": 2,
+            "download.default_directory": DOWNLOAD_DIR,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True
+        })
+        chrome_options.add_argument("--start-maximized")
+        chrome_options.add_argument(f"--user-agent={USER_AGENT}")
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        
+        service = Service(driver_path)
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined}")
+        return driver
 
 
 # === Session-Info speichern ===
