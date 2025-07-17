@@ -19,6 +19,19 @@ jobs:
       with:
         python-version: '3.11'
 
+    - name: Verify Python isolation
+      shell: pwsh
+      run: |
+        # Completely clear any existing Python paths
+        $env:PATH = ($env:PATH.Split(';') | Where-Object { $_ -notmatch 'Python' }) -join ';'
+    
+        # Then add ONLY our desired Python 3.11
+        $env:PATH = "$env:pythonLocation;$env:pythonLocation\Scripts;$env:PATH"
+    
+        # Verify
+        Write-Host "Cleaned PATH: $env:PATH"
+        python -c "import sys; print('\nPython sys.path:', sys.path)"
+
     - name: Install system dependencies
       shell: pwsh
       run: |
@@ -107,12 +120,15 @@ jobs:
     - name: Install webdriver-manager properly
       shell: pwsh
       run: |
-        # Explicitly install with full path to Python 3.11
-        $pythonExe = "$env:pythonLocation\python.exe"
-        & $pythonExe -m pip install --force-reinstall webdriver-manager==4.0.1
+        # First completely uninstall any existing version
+        python -m pip uninstall -y webdriver-manager || echo "No existing installation to remove"
     
-        # Verify installation
-        & $pythonExe -c "from webdriver_manager.chrome import ChromeDriverManager; print('Import successful')"
+        # Install with --no-deps to prevent any conflicts
+        python -m pip install --no-deps --force-reinstall webdriver-manager==4.0.1
+    
+        # Verify the installation location
+        python -c "import webdriver_manager; print(f'webdriver_manager location: {webdriver_manager.__file__}')"
+
         
     - name: Verify webdriver-manager installation
       run: |
@@ -133,9 +149,22 @@ jobs:
         print('ChromeDriver path:', ChromeDriverManager().install())
         "@
 
+
+    - name: Final environment check
+      shell: pwsh
+      run: |
+        Write-Host "=== Final Environment Verification ==="
+        Write-Host "Python path: $(which python)"
+        Write-Host "Python version: $(python --version)"
+        python -c "import sys; print('\n'.join(sys.path))"
+        python -c "import webdriver_manager; print(f'webdriver_manager successfully imported from {webdriver_manager.__file__}')"
+    
     - name: Build EXE with PyInstaller
       shell: pwsh
       run: |
+
+        .\venv\Scripts\activate
+        
         # Create cache directory for webdriver-manager
         $cacheDir = "$env:USERPROFILE\.wdm"
         New-Item -ItemType Directory -Force -Path $cacheDir
