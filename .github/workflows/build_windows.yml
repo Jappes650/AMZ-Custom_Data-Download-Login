@@ -18,19 +18,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'  # oder z.B. 3.11 wenn gewünscht
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Create EXE with PyInstaller
+      - name: Build with PyInstaller
         run: |
           pyinstaller --noconfirm --onefile --windowed Amazon_seller_selenium.py
 
-      - name: Upload EXE as Artifact
-        uses: actions/upload-artifact@v3
+      - name: Upload compiled EXE
+        uses: actions/upload-artifact@v4
         with:
           name: AmazonSellerApp
           path: dist/Amazon_seller_selenium.exe
