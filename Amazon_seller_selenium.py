@@ -51,6 +51,10 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 # === Selenium Setup ===
 def create_driver():
+    print(f"Home directory: {os.path.expanduser('~')}")
+    print(f"Cache directory: {cache_dir}")
+    print(f"Directory exists: {os.path.exists(cache_dir)}")
+    
     # Always use the user's home directory for cache, regardless of PyInstaller
     home_dir = os.path.expanduser('~')
     cache_dir = os.path.join(home_dir, '.wdm', 'drivers', 'chromedriver')
