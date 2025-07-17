@@ -25,9 +25,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build with PyInstaller
+      - name: Build with PyInstaller (.spec)
         run: |
-          pyinstaller --noconfirm --onefile --windowed Amazon_seller_selenium.py
+          pyinstaller Amazon_seller_selenium.spec
 
       - name: Upload compiled EXE
         uses: actions/upload-artifact@v4
