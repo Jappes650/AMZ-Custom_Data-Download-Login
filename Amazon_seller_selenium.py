@@ -51,11 +51,25 @@ def create_driver():
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
 
-    # Direkt den Pfad zur chromedriver.exe verwenden
-    driver = webdriver.Chrome(service=Service("./drivers/chromedriver.exe"), options=chrome_options)
+    # Create drivers directory if it doesn't exist
+    drivers_dir = os.path.join(SCRIPT_DIR, "drivers")
+    if not os.path.exists(drivers_dir):
+        os.makedirs(drivers_dir)
 
-    # Stealth: Entferne "webdriver" aus navigator
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    # Try local driver first, then fall back to ChromeDriverManager
+    local_driver_path = os.path.join(drivers_dir, "chromedriver.exe")
+    if os.path.exists(local_driver_path):
+        try:
+            driver = webdriver.Chrome(service=Service(local_driver_path), options=chrome_options)
+        except:
+            # If local driver fails, use ChromeDriverManager
+            driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+    else:
+        # Use ChromeDriverManager if local driver doesn't exist
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+
+    # Stealth: Remove "webdriver" from navigator
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined}")
     return driver
 
 # === Session-Info speichern ===
