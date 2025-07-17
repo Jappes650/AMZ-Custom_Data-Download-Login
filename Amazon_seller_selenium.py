@@ -94,16 +94,13 @@ def load_session_info():
 # === Cookies speichern ===
 def save_cookies(driver):
     try:
-        # Verify we can write to the directory
-        test_file = os.path.join(SCRIPT_DIR, "test_write.tmp")
+        # Verify browser is still connected
         try:
-            with open(test_file, "w") as f:
-                f.write("test")
-            os.remove(test_file)
-        except Exception as e:
-            print(f"Cannot write to directory: {str(e)}")
+            driver.current_url  # Simple check if browser is alive
+        except:
+            print("Browser disconnected, cannot save cookies")
             return False
-
+            
         # Get and filter cookies
         cookies = driver.get_cookies()
         print(f"Found {len(cookies)} cookies total")
@@ -182,64 +179,51 @@ def load_cookies(driver):
 # === Login-Status prüfen ===
 def is_logged_in(driver):
     try:
-        # Warte bis Seite geladen ist
+        # Wait for page to load
         WebDriverWait(driver, 15).until(
             lambda d: d.execute_script("return document.readyState") == "complete"
         )
         
         current_url = driver.current_url
-        print(f"Aktuelle URL: {current_url}")
+        print(f"Login check - Current URL: {current_url}")
         
-        # Prüfe ob wir auf einer Login-Seite sind
+        # Check if we're still on a login page
         if any(keyword in current_url.lower() for keyword in ["signin", "login", "auth"]):
-            print("Auf Login-Seite erkannt")
+            print("Login page detected")
             return False
-        
-        # Prüfe verschiedene Indikatoren für erfolgreichen Login
-        login_indicators = [
-            # Hauptsuchfeld
-            'input#sc-search-field',
-            'input.search-input',
-            # Navigation/Header Elemente
-            'nav[role="navigation"]',
-            '#sc-navtab-reports',
-            '#sc-navtab-orders',
-            # Seller Central spezifische Elemente
-            '.sc-dashboard',
-            '[data-testid="sc-content"]',
-            # Fallback: Jedes input field das nicht Login ist
-            'input[type="text"]:not([name*="email"]):not([name*="password"])'
-        ]
-        
-        for selector in login_indicators:
-            try:
-                element = driver.find_element(By.CSS_SELECTOR, selector)
-                if element.is_displayed():
-                    print(f"Login-Indikator gefunden: {selector}")
-                    return True
-            except:
-                continue
-        
-        # Zusätzliche Prüfung: Wenn URL seller central enthält und nicht login
-        if "sellercentral" in current_url and not any(keyword in current_url.lower() for keyword in ["signin", "login"]):
-            print("Seller Central URL erkannt, Login wahrscheinlich erfolgreich")
+            
+        # Special case for Amazon's redirect flow
+        if "home?mons_sel_mkid" in current_url:
+            print("Detected Amazon post-login redirect")
             return True
             
-        print("Keine Login-Indikatoren gefunden")
+        # Check for dashboard elements
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.sc-dashboard, input#sc-search-field"))
+            )
+            print("Dashboard elements found")
+            return True
+        except:
+            pass
+            
         return False
         
     except Exception as e:
-        print(f"Login-Status konnte nicht geprüft werden: {e}")
-        # Im Zweifelsfall True zurückgeben wenn keine klaren Fehler
-        return True
+        print(f"Login check error: {str(e)}")
+        return False
 
 # === Login durchführen (manuell) ===
 def manual_login():
     driver = None
+    login_success = False
+    
     try:
+        # Initialize driver
         driver = create_driver()
         driver.get(LOGIN_URL)
         
+        # Show login instructions
         messagebox.showinfo(
             "Login erforderlich", 
             "Bitte logge dich jetzt manuell ein (inkl. 2FA).\n\n"
@@ -249,11 +233,10 @@ def manual_login():
             "- Drücke erst dann OK"
         )
         
-        # Wait for login completion with proper verification
-        login_success = False
+        # Wait for user to complete login (5 minute timeout)
         try:
             WebDriverWait(driver, 300).until(
-                lambda d: is_logged_in(d)  # Use the proper login check
+                lambda d: is_logged_in(d)
             )
             login_success = True
         except Exception as e:
@@ -264,28 +247,27 @@ def manual_login():
         print(f"Final login status: {login_success}")
         print(f"Current URL: {driver.current_url}")
         
-        # Save cookies with detailed feedback
-        if save_cookies(driver):
-            if login_success:
+        # Save cookies if possible
+        if login_success:
+            if save_cookies(driver):
                 messagebox.showinfo("Erfolg", "Login erfolgreich & Cookies gespeichert!")
             else:
-                messagebox.showwarning("Hinweis", 
-                    "Cookies gespeichert, aber Login-Status unsicher.\n"
-                    "Bitte die Suche testen.")
+                messagebox.showerror("Fehler", "Login erfolgreich aber Cookies konnten nicht gespeichert werden!")
         else:
-            messagebox.showerror("Fehler", "Cookies konnten NICHT gespeichert werden!")
-            
+            messagebox.showwarning("Warnung", 
+                "Login scheint nicht vollständig zu sein.\n"
+                "Bitte versuche es erneut und stelle sicher, dass du komplett eingeloggt bist.")
+                
     except Exception as e:
         messagebox.showerror("Kritischer Fehler", f"Login-Prozess fehlgeschlagen: {str(e)}")
     finally:
         if driver:
             try:
-                print("Closing browser...")
+                print("Attempting to close browser...")
                 driver.quit()
                 print("Browser closed successfully")
             except Exception as e:
                 print(f"Error closing browser: {str(e)}")
-
 
 # === Verarbeite heruntergeladene ZIP-Datei ===
 def process_downloaded_zip(order_number):
