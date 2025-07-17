@@ -43,6 +43,14 @@ jobs:
         C:\tools\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm mingw-w64-x86_64-cairo"
         C:\tools\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm mingw-w64-x86_64-gdk-pixbuf2"
         C:\tools\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm mingw-w64-x86_64-pango"
+
+        # Add Python 3.11 to PATH before MSYS2 paths
+        $pythonPath = "$env:pythonLocation\Scripts;$env:pythonLocation"
+        echo "$pythonPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+        # Then add MSYS2 paths
+        echo "C:\tools\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        echo "C:\tools\msys64\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         
         # Create cairo_dlls directory and copy necessary DLLs
         New-Item -ItemType Directory -Force -Path "cairo_dlls"
@@ -88,8 +96,23 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Install webdriver-manager explicitly
-      run: pip install webdriver-manager==4.0.1
+    - name: Verify Python environment
+      shell: pwsh
+      run: |
+        Write-Host "Python executable: $(which python)"
+        Write-Host "Python version: $(python --version)"
+        Write-Host "Python path: $env:pythonLocation"
+        python -c "import sys; print('\n'.join(sys.path))"
+
+    - name: Install webdriver-manager properly
+      shell: pwsh
+      run: |
+        # Explicitly install with full path to Python 3.11
+        $pythonExe = "$env:pythonLocation\python.exe"
+        & $pythonExe -m pip install --force-reinstall webdriver-manager==4.0.1
+    
+        # Verify installation
+        & $pythonExe -c "from webdriver_manager.chrome import ChromeDriverManager; print('Import successful')"
         
     - name: Verify webdriver-manager installation
       run: |
@@ -99,19 +122,16 @@ jobs:
     - name: Pre-download ChromeDriver
       shell: pwsh
       run: |
-        # Explicit installation with verbose output
-        pip install -v webdriver-manager==4.0.1
-    
-        # Verify installation
-        python -c "import sys; print(sys.path); from webdriver_manager.chrome import ChromeDriverManager; print('Import successful')"
-    
-        # Setup cache
+        $pythonExe = "$env:pythonLocation\python.exe"
         $cacheDir = "$env:USERPROFILE\.wdm"
         New-Item -ItemType Directory -Force -Path $cacheDir
     
-        # Pre-download with full path
-        $pythonPath = (Get-Command python).Source
-        & $pythonPath -c "import os; os.environ['WDM_CACHE_DIR'] = os.path.join(os.path.expanduser('~'), '.wdm'); from webdriver_manager.chrome import ChromeDriverManager; print('ChromeDriver path:', ChromeDriverManager().install())"
+        & $pythonExe -c @"
+        import os
+        os.environ['WDM_CACHE_DIR'] = os.path.join(os.path.expanduser('~'), '.wdm')
+        from webdriver_manager.chrome import ChromeDriverManager
+        print('ChromeDriver path:', ChromeDriverManager().install())
+        "@
 
     - name: Build EXE with PyInstaller
       shell: pwsh
