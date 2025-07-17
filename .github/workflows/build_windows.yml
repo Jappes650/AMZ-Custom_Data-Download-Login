@@ -33,4 +33,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: AmazonSellerApp
-          path: dist/Amazon_seller_selenium.exe
+          path: dist/*.exe
