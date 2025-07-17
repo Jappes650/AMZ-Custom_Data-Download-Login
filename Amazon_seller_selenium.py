@@ -1,6 +1,4 @@
-import sys
 import os
-os.environ['WDM_LOCAL'] = '1'  # Damit Webdriver im lokalen AppData gespeichert wird
 import time
 import pickle
 import json
@@ -10,7 +8,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.driver_cache import CacheManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
@@ -22,20 +19,9 @@ import base64
 from lxml import etree
 import shutil
 
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
-
-
 # === Globale Variablen ===
-COOKIE_FILE = resource_path("amazon_cookies.pkl")
-SESSION_FILE = resource_path("amazon_session_info.json")
+COOKIE_FILE = "amazon_cookies.pkl"
+SESSION_FILE = "amazon_session_info.json"
 LOGIN_URL = "https://sellercentral.amazon.de"
 SEARCH_FIELD_SELECTOR = 'input#sc-search-field.search-input.search-input-active'
 SEARCH_BUTTON_SELECTOR = 'button.sc-search-button.search-icon-container'
@@ -51,51 +37,6 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 # === Selenium Setup ===
 def create_driver():
-    """Create and configure a Chrome WebDriver with automatic ChromeDriver management"""
-    # Configure cache directory - ALWAYS use the user's home folder
-    home_dir = os.path.expanduser('~')
-    cache_dir = os.path.join(home_dir, '.wdm')
-    
-    # Ensure the directory exists (create all parent folders if needed)
-    try:
-        os.makedirs(cache_dir, exist_ok=True)
-    except Exception as e:
-        print(f"Error creating cache directory: {e}")
-        # Fallback to temp directory if home directory fails
-        import tempfile
-        cache_dir = tempfile.mkdtemp()
-        print(f"Using temporary directory: {cache_dir}")
-
-    # DEBUG: Print paths for verification (remove in production)
-    print(f"Home directory: {home_dir}")
-    print(f"Using cache directory: {cache_dir}")
-    print(f"Directory exists: {os.path.exists(cache_dir)}")
-
-    # Configure webdriver-manager environment
-    os.environ['WDM_LOCAL'] = '1'
-    os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
-    os.environ['WDM_LOG_LEVEL'] = '0'
-    os.environ['WDM_CACHE_DIR'] = cache_dir  # Critical override
-
-    # Install ChromeDriver with multiple fallback strategies
-    max_retries = 2
-    driver_path = None
-    
-    for attempt in range(max_retries):
-        try:
-            # Try standard installation first
-            driver_path = ChromeDriverManager(path=cache_dir).install()
-            break
-        except Exception as e:
-            print(f"Attempt {attempt + 1} failed: {e}")
-            if attempt == max_retries - 1:
-                raise  # Re-raise last error
-            # Clean cache and retry
-            import shutil
-            shutil.rmtree(cache_dir, ignore_errors=True)
-            os.makedirs(cache_dir, exist_ok=True)
-
-    # Configure Chrome options
     chrome_options = Options()
     chrome_options.add_experimental_option("prefs", {
         "profile.default_content_setting_values.notifications": 2,
@@ -109,14 +50,13 @@ def create_driver():
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
-    
-    # Create driver instance
-    service = Service(driver_path)
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-    
-    return driver
 
+    # Direkt den Pfad zur chromedriver.exe verwenden
+    driver = webdriver.Chrome(service=Service("./drivers/chromedriver.exe"), options=chrome_options)
+
+    # Stealth: Entferne "webdriver" aus navigator
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    return driver
 
 # === Session-Info speichern ===
 def save_session_info(driver):
@@ -421,8 +361,21 @@ def convert_svg_to_tiff(svg_path, output_path=None):
             scale=1.0  # Keine Skalierung
         )
 
-        # 2. Konvertiere PNG zu TIFF
+        # 2. Öffne das PNG und entferne Transparenz durch Cropping
         img = Image.open(png_path)
+        
+        if img.mode in ('RGBA', 'LA'):
+            # Finde die Bounding Box des nicht-transparenten Bereichs
+            bbox = img.getbbox()
+            
+            if bbox:
+                # Schneide das Bild auf den nicht-transparenten Bereich zu
+                img = img.crop(bbox)
+            else:
+                messagebox.showerror("Fehler", "Das Bild enthält nur transparente Pixel")
+                return False
+
+        # 3. Konvertiere PNG zu TIFF
         img.save(
             output_path,
             format="TIFF",
@@ -465,7 +418,43 @@ def search_order(order_number):
             driver.quit()
             return
 
-        # Suchfeld schneller finden mit explizitem Wait
+        # Prüfen ob Account-Auswahlfenster erscheint (Deutschland auswählen)
+        try:
+            # Warte auf das Account-Auswahlfenster
+            germany_button = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'button.full-page-account-switcher-account-details span.full-page-account-switcher-account-label'))
+            )
+
+            # Alternative Suche falls das erste nicht funktioniert
+            if "Deutschland" not in germany_button.text:
+                buttons = driver.find_elements(By.CSS_SELECTOR, 'button.full-page-account-switcher-account-details')
+                for btn in buttons:
+                    if "Deutschland" in btn.text:
+                        germany_button = btn
+                        break
+    
+            # Prüfe ob der Button "Deutschland" enthält
+            if "Deutschland" in germany_button.text:
+                germany_button.click()
+                print("Deutschland Account ausgewählt")
+                time.sleep(2)  # Warte bis die Auswahl wirksam wird
+
+                # Warte auf und klicke den Bestätigungsbutton
+            try:
+                confirm_button = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, 'button.kat-button--primary.full-page-account-switcher-buttons'))
+                )
+                confirm_button.click()
+                print("Konto-Auswahl bestätigt")
+                time.sleep(2)  # Warte bis die Auswahl wirksam wird
+            except Exception as e:
+                print(f"Bestätigungsbutton nicht gefunden: {str(e)}")
+        except Exception as e:
+            # Falls das Fenster nicht erscheint, einfach fortfahren
+            print(f"Kein Account-Auswahlfenster gefunden oder Fehler: {str(e)}")
+            pass
+        
+        #Suchfeld schneller finden mit explizitem Wait
         search_field = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "input#sc-search-field"))
         )
