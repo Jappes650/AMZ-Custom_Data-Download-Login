@@ -1,66 +1,114 @@
-def create_driver():
-    """Create and configure a Chrome WebDriver with automatic ChromeDriver management"""
-    # Configure cache directory - ALWAYS use the user's home folder
-    home_dir = os.path.expanduser('~')
-    cache_dir = os.path.join(home_dir, '.wdm')
-    
-    # Ensure the directory exists (create all parent folders if needed)
-    try:
-        os.makedirs(cache_dir, exist_ok=True)
-    except Exception as e:
-        print(f"Error creating cache directory: {e}")
-        # Fallback to temp directory if home directory fails
-        import tempfile
-        cache_dir = tempfile.mkdtemp()
-        print(f"Using temporary directory: {cache_dir}")
+name: Build on Windows with Cairo
 
-    # DEBUG: Print paths for verification (remove in production)
-    print(f"Home directory: {home_dir}")
-    print(f"Using cache directory: {cache_dir}")
-    print(f"Directory exists: {os.path.exists(cache_dir)}")
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
-    # Configure webdriver-manager environment
-    os.environ['WDM_LOCAL'] = '1'
-    os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
-    os.environ['WDM_LOG_LEVEL'] = '0'
-    os.environ['WDM_CACHE_DIR'] = cache_dir  # Critical override
+jobs:
+  build:
+    runs-on: windows-latest
 
-    # Install ChromeDriver with multiple fallback strategies
-    max_retries = 2
-    driver_path = None
-    
-    for attempt in range(max_retries):
-        try:
-            # Try standard installation first
-            driver_path = ChromeDriverManager(path=cache_dir).install()
-            break
-        except Exception as e:
-            print(f"Attempt {attempt + 1} failed: {e}")
-            if attempt == max_retries - 1:
-                raise  # Re-raise last error
-            # Clean cache and retry
-            import shutil
-            shutil.rmtree(cache_dir, ignore_errors=True)
-            os.makedirs(cache_dir, exist_ok=True)
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-    # Configure Chrome options
-    chrome_options = Options()
-    chrome_options.add_experimental_option("prefs", {
-        "profile.default_content_setting_values.notifications": 2,
-        "download.default_directory": DOWNLOAD_DIR,
-        "download.prompt_for_download": False,
-        "download.directory_upgrade": True,
-        "safebrowsing.enabled": True
-    })
-    chrome_options.add_argument("--start-maximized")
-    chrome_options.add_argument(f"--user-agent={USER_AGENT}")
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-    
-    # Create driver instance
-    service = Service(driver_path)
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-    
-    return driver
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install system dependencies
+      shell: pwsh
+      run: |
+        # Install chocolatey packages
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        
+        choco install -y 7zip pkgconfiglite
+        
+        # Install MSYS2 for Cairo
+        choco install -y msys2
+        
+        # Add to PATH
+        echo "C:\tools\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        echo "C:\tools\msys64\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+    - name: Install Cairo via MSYS2
+      shell: pwsh
+      run: |
+        # Install Cairo and related libraries via MSYS2
+        C:\tools\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm mingw-w64-x86_64-cairo"
+        C:\tools\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm mingw-w64-x86_64-gdk-pixbuf2"
+        C:\tools\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm mingw-w64-x86_64-pango"
+        
+        # Create cairo_dlls directory and copy necessary DLLs
+        New-Item -ItemType Directory -Force -Path "cairo_dlls"
+        
+        # Copy Cairo and related DLLs
+        $sourceDir = "C:\tools\msys64\mingw64\bin"
+        $targetDir = "cairo_dlls"
+        
+        $dllsToInclude = @(
+            "libcairo-2.dll",
+            "libcairo-gobject-2.dll",
+            "libpango-1.0-0.dll",
+            "libpangocairo-1.0-0.dll",
+            "libgdk_pixbuf-2.0-0.dll",
+            "libgobject-2.0-0.dll",
+            "libglib-2.0-0.dll",
+            "libintl-8.dll",
+            "libiconv-2.dll",
+            "libharfbuzz-0.dll",
+            "libfontconfig-1.dll",
+            "libfreetype-6.dll",
+            "libpixman-1-0.dll",
+            "libpng16-16.dll",
+            "zlib1.dll"
+        )
+        
+        foreach ($dll in $dllsToInclude) {
+            $sourcePath = Join-Path $sourceDir $dll
+            if (Test-Path $sourcePath) {
+                Copy-Item $sourcePath -Destination $targetDir -Force
+                Write-Host "Copied: $dll"
+            } else {
+                Write-Host "Not found: $dll"
+            }
+        }
+        
+        # List what we have
+        Write-Host "Cairo DLLs available:"
+        Get-ChildItem -Path "cairo_dlls"
+    - name: Upgrade pip and install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    - name: Build EXE with PyInstaller
+      shell: pwsh
+      run: |
+        # Build with comprehensive Cairo support
+        pyinstaller --onefile `
+          --add-data "amazon_cookies.pkl;." `
+          --add-data "amazon_session_info.json;." `
+          --add-binary "cairo_dlls\*.dll;." `
+          --hidden-import cairocffi `
+          --hidden-import cairosvg `
+          --hidden-import cairocffi._ffi `
+          --hidden-import cairocffi._generated.ffi `
+          --collect-all cairocffi `
+          --collect-all cairosvg `
+          --collect-submodules cairocffi `
+          --collect-submodules cairosvg `
+          --paths "C:\tools\msys64\mingw64\bin" `
+          --paths "C:\tools\msys64\usr\bin" `
+          Amazon_seller_selenium.py
+    - name: List EXE output
+      run: dir dist
+
+    - name: Upload EXE as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: amazon-seller-exe
+        path: dist/*.exe
