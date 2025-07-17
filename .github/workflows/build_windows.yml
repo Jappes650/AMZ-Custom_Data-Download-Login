@@ -87,10 +87,13 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+
+    - name: Install webdriver-manager explicitly
+      run: pip install webdriver-manager==4.0.1
         
     - name: Verify webdriver-manager installation
       run: |
-        python -c "import webdriver_manager; print('webdriver-manager version:', webdriver_manager.__version__)"
+        python -c "from webdriver_manager.chrome import ChromeDriverManager; print('webdriver-manager version:', ChromeDriverManager().driver.get_version())"
         pip list | findstr webdriver
 
     - name: Pre-download ChromeDriver
@@ -99,9 +102,9 @@ jobs:
         # Create a proper cache directory first
         $cacheDir = "$env:USERPROFILE\.wdm"
         New-Item -ItemType Directory -Force -Path $cacheDir
-        
+    
         # Pre-download ChromeDriver to avoid runtime issues
-        python -c "import os; os.environ['WDM_CACHE_DIR'] = os.path.join(os.path.expanduser('~'), '.wdm'); from webdriver_manager.chrome import ChromeDriverManager; ChromeDriverManager().install()"    
+        python -c "import os; os.environ['WDM_CACHE_DIR'] = os.path.join(os.path.expanduser('~'), '.wdm'); from webdriver_manager.chrome import ChromeDriverManager; ChromeDriverManager().install()"
 
     - name: Build EXE with PyInstaller
       shell: pwsh
