@@ -50,44 +50,41 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 # === Selenium Setup ===
 def create_driver():
-    # Configure webdriver manager settings - FIXED VERSION
-    cache_dir = os.path.join(os.path.expanduser('~'), '.wdm')
+    # Try to use bundled ChromeDriver first (for PyInstaller)
+    bundled_chromedriver = resource_path("chromedriver.exe")
     
-    # Ensure cache directory exists
-    os.makedirs(cache_dir, exist_ok=True)
-    
-    # Set environment variables for webdriver manager
-    os.environ['WDM_LOCAL'] = '1'
-    os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
-    os.environ['WDM_LOG_LEVEL'] = '0'
-    os.environ['WDM_CACHE_DIR'] = cache_dir
-    
-    # Additional fix for PyInstaller
-    if getattr(sys, 'frozen', False):
-        # Running in PyInstaller bundle - force specific cache location
+    if os.path.exists(bundled_chromedriver):
+        print("Using bundled ChromeDriver")
+        driver_path = bundled_chromedriver
+    else:
+        print("Bundled ChromeDriver not found, trying to download...")
+        # Configure webdriver manager settings - FIXED VERSION for non-bundled execution
+        cache_dir = os.path.join(os.path.expanduser('~'), '.wdm')
+        
+        # Ensure cache directory exists
+        os.makedirs(cache_dir, exist_ok=True)
+        
+        # Set environment variables for webdriver manager
+        os.environ['WDM_LOCAL'] = '1'
+        os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
+        os.environ['WDM_LOG_LEVEL'] = '0'
         os.environ['WDM_CACHE_DIR'] = cache_dir
-        # Prevent webdriver manager from using sys._MEIPASS paths
-        import tempfile
-        temp_dir = tempfile.gettempdir()
-        wdm_temp = os.path.join(temp_dir, 'wdm_cache')
-        os.makedirs(wdm_temp, exist_ok=True)
-        os.environ['WDM_CACHE_DIR'] = wdm_temp
-
-    try:
-        # Install ChromeDriver with improved error handling
-        driver_path = ChromeDriverManager().install()
-    except Exception as e:
-        print(f"First ChromeDriver installation attempt failed: {e}")
+        
         try:
-            # Fallback: Try with different cache directory
-            fallback_cache = os.path.join(os.path.expanduser('~'), 'AppData', 'Local', 'wdm_cache')
-            os.makedirs(fallback_cache, exist_ok=True)
-            os.environ['WDM_CACHE_DIR'] = fallback_cache
+            # Install ChromeDriver with improved error handling
             driver_path = ChromeDriverManager().install()
-        except Exception as e2:
-            print(f"Second ChromeDriver installation attempt failed: {e2}")
-            # Final fallback: Use system PATH or manual installation
-            raise Exception(f"ChromeDriver installation failed. Please install ChromeDriver manually. Error: {e2}")
+        except Exception as e:
+            print(f"First ChromeDriver installation attempt failed: {e}")
+            try:
+                # Fallback: Try with different cache directory
+                fallback_cache = os.path.join(os.path.expanduser('~'), 'AppData', 'Local', 'wdm_cache')
+                os.makedirs(fallback_cache, exist_ok=True)
+                os.environ['WDM_CACHE_DIR'] = fallback_cache
+                driver_path = ChromeDriverManager().install()
+            except Exception as e2:
+                print(f"Second ChromeDriver installation attempt failed: {e2}")
+                # Final fallback: Use system PATH or manual installation
+                raise Exception(f"ChromeDriver installation failed. Please install ChromeDriver manually and add it to your PATH. Error: {e2}")
 
     chrome_options = Options()
     chrome_options.add_experimental_option("prefs", {
