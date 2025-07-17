@@ -51,36 +51,49 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 # === Selenium Setup ===
 def create_driver():
-    print(f"Home directory: {os.path.expanduser('~')}")
-    print(f"Cache directory: {cache_dir}")
-    print(f"Directory exists: {os.path.exists(cache_dir)}")
-    
-    # Always use the user's home directory for cache, regardless of PyInstaller
+    """Create and configure a Chrome WebDriver with automatic ChromeDriver management"""
+    # Configure cache directory - ALWAYS use the user's home folder
     home_dir = os.path.expanduser('~')
-    cache_dir = os.path.join(home_dir, '.wdm', 'drivers', 'chromedriver')
+    cache_dir = os.path.join(home_dir, '.wdm')
     
-    # Ensure the cache directory exists
-    os.makedirs(cache_dir, exist_ok=True)
+    # Ensure the directory exists (create all parent folders if needed)
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except Exception as e:
+        print(f"Error creating cache directory: {e}")
+        # Fallback to temp directory if home directory fails
+        import tempfile
+        cache_dir = tempfile.mkdtemp()
+        print(f"Using temporary directory: {cache_dir}")
 
-    # DEBUG: Print paths to verify (remove in production)
+    # DEBUG: Print paths for verification (remove in production)
+    print(f"Home directory: {home_dir}")
     print(f"Using cache directory: {cache_dir}")
     print(f"Directory exists: {os.path.exists(cache_dir)}")
-    
-    # Configure webdriver-manager environment variables
+
+    # Configure webdriver-manager environment
     os.environ['WDM_LOCAL'] = '1'
     os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
     os.environ['WDM_LOG_LEVEL'] = '0'
-    os.environ['WDM_CACHE_DIR'] = os.path.join(home_dir, '.wdm')
+    os.environ['WDM_CACHE_DIR'] = cache_dir  # Critical override
+
+    # Install ChromeDriver with multiple fallback strategies
+    max_retries = 2
+    driver_path = None
     
-    try:
-        # Install ChromeDriver
-        driver_path = ChromeDriverManager(cache_manager=CacheManager(os.path.join(home_dir, '.wdm'))).install()
-    except Exception as e:
-        # Nuclear option: Delete cache and retry
-        import shutil
-        shutil.rmtree(os.path.join(home_dir, '.wdm'), ignore_errors=True)
-        os.makedirs(cache_dir, exist_ok=True)
-        driver_path = ChromeDriverManager().install
+    for attempt in range(max_retries):
+        try:
+            # Try standard installation first
+            driver_path = ChromeDriverManager(path=cache_dir).install()
+            break
+        except Exception as e:
+            print(f"Attempt {attempt + 1} failed: {e}")
+            if attempt == max_retries - 1:
+                raise  # Re-raise last error
+            # Clean cache and retry
+            import shutil
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            os.makedirs(cache_dir, exist_ok=True)
 
     # Configure Chrome options
     chrome_options = Options()
@@ -97,9 +110,11 @@ def create_driver():
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
     
+    # Create driver instance
     service = Service(driver_path)
     driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined}")
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    
     return driver
 
 
