@@ -50,31 +50,29 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 # === Selenium Setup ===
 def create_driver():
-    # Configure webdriver manager settings
-    if getattr(sys, 'frozen', False):
-        # Running in PyInstaller bundle - use user's home directory for cache
-        home_dir = os.path.expanduser('~')
-        cache_dir = os.path.join(home_dir, '.wdm')
-        os.makedirs(cache_dir, exist_ok=True)
-        os.environ['WDM_LOCAL'] = '1'
-        os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
-        os.environ['WDM_LOG_LEVEL'] = '0'
-        os.environ['WDM_CACHE_DIR'] = cache_dir
-    else:
-        # Running in normal Python environment
-        os.environ['WDM_LOCAL'] = '1'
+    # Always use the user's home directory for cache, regardless of PyInstaller
+    home_dir = os.path.expanduser('~')
+    cache_dir = os.path.join(home_dir, '.wdm')
+    
+    # Ensure the cache directory exists
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Configure webdriver-manager environment variables
+    os.environ['WDM_LOCAL'] = '1'
+    os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
+    os.environ['WDM_LOG_LEVEL'] = '0'
+    os.environ['WDM_CACHE_DIR'] = cache_dir  # Force cache directory
 
     try:
-        # Install ChromeDriver with retry logic
+        # Install ChromeDriver
         driver_path = ChromeDriverManager().install()
     except Exception as e:
-        # Fallback to user's home directory if first attempt fails
-        home_dir = os.path.expanduser('~')
-        cache_dir = os.path.join(home_dir, '.wdm')
+        # If installation fails, retry with a fresh cache directory
+        shutil.rmtree(cache_dir, ignore_errors=True)
         os.makedirs(cache_dir, exist_ok=True)
-        os.environ['WDM_CACHE_DIR'] = cache_dir
         driver_path = ChromeDriverManager().install()
 
+    # Configure Chrome options
     chrome_options = Options()
     chrome_options.add_experimental_option("prefs", {
         "profile.default_content_setting_values.notifications": 2,
