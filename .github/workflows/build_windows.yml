@@ -90,6 +90,7 @@ jobs:
       run: |
         # Build with comprehensive Cairo support
         pyinstaller --onefile `
+          --add-data "drivers/chromedriver.exe;drivers" `
           --add-data "amazon_cookies.pkl;." `
           --add-data "amazon_session_info.json;." `
           --add-binary "cairo_dlls\*.dll;." `
