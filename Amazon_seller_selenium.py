@@ -51,7 +51,7 @@ if not os.path.exists(DOWNLOAD_DIR):
 # === Selenium Setup ===
 def create_driver():
     # Try to use bundled ChromeDriver first (for PyInstaller)
-    bundled_chromedriver = resource_path("chromedriver.exe")
+    bundled_chromedriver = resource_path(os.path.join("drivers", "chromedriver.exe"))
     
     if os.path.exists(bundled_chromedriver):
         print("Using bundled ChromeDriver")
