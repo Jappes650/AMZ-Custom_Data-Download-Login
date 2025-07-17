@@ -10,6 +10,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.driver_cache import CacheManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
@@ -52,25 +53,30 @@ if not os.path.exists(DOWNLOAD_DIR):
 def create_driver():
     # Always use the user's home directory for cache, regardless of PyInstaller
     home_dir = os.path.expanduser('~')
-    cache_dir = os.path.join(home_dir, '.wdm')
+    cache_dir = os.path.join(home_dir, '.wdm', 'drivers', 'chromedriver')
     
     # Ensure the cache directory exists
     os.makedirs(cache_dir, exist_ok=True)
+
+    # DEBUG: Print paths to verify (remove in production)
+    print(f"Using cache directory: {cache_dir}")
+    print(f"Directory exists: {os.path.exists(cache_dir)}")
     
     # Configure webdriver-manager environment variables
     os.environ['WDM_LOCAL'] = '1'
     os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
     os.environ['WDM_LOG_LEVEL'] = '0'
-    os.environ['WDM_CACHE_DIR'] = cache_dir  # Force cache directory
-
+    os.environ['WDM_CACHE_DIR'] = os.path.join(home_dir, '.wdm')
+    
     try:
         # Install ChromeDriver
-        driver_path = ChromeDriverManager().install()
+        driver_path = ChromeDriverManager(cache_manager=CacheManager(os.path.join(home_dir, '.wdm'))).install()
     except Exception as e:
-        # If installation fails, retry with a fresh cache directory
-        shutil.rmtree(cache_dir, ignore_errors=True)
+        # Nuclear option: Delete cache and retry
+        import shutil
+        shutil.rmtree(os.path.join(home_dir, '.wdm'), ignore_errors=True)
         os.makedirs(cache_dir, exist_ok=True)
-        driver_path = ChromeDriverManager().install()
+        driver_path = ChromeDriverManager().install
 
     # Configure Chrome options
     chrome_options = Options()
