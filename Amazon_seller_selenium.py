@@ -356,18 +356,17 @@ def process_downloaded_zip(order_number):
     # Warte auf den Download
     time.sleep(5)
     
-    # Finde die neueste ZIP-Datei im Download-Verzeichnis
+    # Finde die neueste ZIP-Datei im DOWNLOAD_DIR (nicht im temporären Verzeichnis)
     zip_files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.zip')]
     if not zip_files:
-        messagebox.showerror("Fehler", "Keine ZIP-Datei gefunden.")
+        messagebox.showerror("Fehler", f"Keine ZIP-Datei gefunden in: {DOWNLOAD_DIR}")
         return
     
     latest_zip = max(zip_files, key=lambda f: os.path.getmtime(os.path.join(DOWNLOAD_DIR, f)))
     zip_path = os.path.join(DOWNLOAD_DIR, latest_zip)
     
-    # Erstelle einen Ordner für die entpackten Dateien im SKRIPT-Verzeichnis (nicht temp)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    extract_dir = os.path.join(script_dir, "amazon_order_downloads", order_number)
+    # Erstelle einen Ordner für die entpackten Dateien im DOWNLOAD_DIR
+    extract_dir = os.path.join(DOWNLOAD_DIR, order_number)
     
     if os.path.exists(extract_dir):
         shutil.rmtree(extract_dir)
@@ -376,23 +375,28 @@ def process_downloaded_zip(order_number):
     try:
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(extract_dir)
+        print(f"Dateien entpackt nach: {extract_dir}")
     except Exception as e:
-        messagebox.showerror("Fehler", f"Fehler beim Entpacken der ZIP-Datei: {e}")
+        messagebox.showerror("Fehler", f"Fehler beim Entpacken der ZIP-Datei: {e}\nPfad: {zip_path}")
         return
     
-    # Verarbeite die Dateien und gebe den endgültigen Pfad zurück
+    # Verarbeite die Dateien
     tiff_path = process_files(extract_dir, order_number)
     
     if tiff_path and os.path.exists(tiff_path):
-        # Zeige den Speicherort an
         messagebox.showinfo("Erfolg", 
             f"TIFF-Datei erfolgreich erstellt:\n{tiff_path}\n\n"
             "Die Datei befindet sich im Unterordner 'amazon_order_downloads'.")
-        
-        # Öffne den Explorer im Zielordner
         os.startfile(os.path.dirname(tiff_path))
     else:
         messagebox.showerror("Fehler", "TIFF-Datei konnte nicht erstellt werden.")
+    
+    # Lösche die ZIP-Datei nach erfolgreicher Verarbeitung
+    try:
+        os.remove(zip_path)
+        print(f"ZIP-Datei gelöscht: {zip_path}")
+    except Exception as e:
+        print(f"Warnung: ZIP-Datei konnte nicht gelöscht werden: {e}")
 
 def process_files(extract_dir, order_number):
     """Verarbeite die SVG und JPG Dateien zu TIFF"""
