@@ -354,7 +354,7 @@ def check_cookie_status():
 # === Verarbeite heruntergeladene ZIP-Datei ===
 def process_downloaded_zip(order_number):
     # Warte auf den Download
-    time.sleep(5)  # Wartezeit für den Download
+    time.sleep(5)
     
     # Finde die neueste ZIP-Datei im Download-Verzeichnis
     zip_files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.zip')]
@@ -362,17 +362,17 @@ def process_downloaded_zip(order_number):
         messagebox.showerror("Fehler", "Keine ZIP-Datei gefunden.")
         return
     
-    # Nehme die neueste ZIP-Datei
     latest_zip = max(zip_files, key=lambda f: os.path.getmtime(os.path.join(DOWNLOAD_DIR, f)))
     zip_path = os.path.join(DOWNLOAD_DIR, latest_zip)
     
-    # Erstelle einen Ordner für die entpackten Dateien (mit Bestellnummer als Name)
-    extract_dir = os.path.join(DOWNLOAD_DIR, order_number)
+    # Erstelle einen Ordner für die entpackten Dateien im SKRIPT-Verzeichnis (nicht temp)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    extract_dir = os.path.join(script_dir, "amazon_order_downloads", order_number)
+    
     if os.path.exists(extract_dir):
         shutil.rmtree(extract_dir)
     os.makedirs(extract_dir)
     
-    # Entpacke die ZIP-Datei
     try:
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(extract_dir)
@@ -380,36 +380,58 @@ def process_downloaded_zip(order_number):
         messagebox.showerror("Fehler", f"Fehler beim Entpacken der ZIP-Datei: {e}")
         return
     
-    # Finde die SVG-Datei und die größte JPG-Datei
-    svg_file = None
-    jpg_files = []
+    # Verarbeite die Dateien und gebe den endgültigen Pfad zurück
+    tiff_path = process_files(extract_dir, order_number)
     
-    for root, dirs, files in os.walk(extract_dir):
-        for file in files:
-            if file.lower().endswith('.svg'):
-                svg_file = os.path.join(root, file)
-            elif file.lower().endswith('.jpg') or file.lower().endswith('.jpeg'):
-                jpg_files.append(os.path.join(root, file))
-    
-    if not svg_file:
-        messagebox.showerror("Fehler", "Keine SVG-Datei in der ZIP-Datei gefunden.")
-        return
-    
-    if not jpg_files:
-        messagebox.showerror("Fehler", "Keine JPG-Dateien in der ZIP-Datei gefunden.")
-        return
-    
-    # Wähle die größte JPG-Datei (wahrscheinlich die richtige)
-    largest_jpg = max(jpg_files, key=lambda f: os.path.getsize(f))
-    
-    # Verarbeite die Dateien
-    if process_files(svg_file, largest_jpg, extract_dir, order_number):
-        # Lösche die ZIP-Datei nur wenn die Verarbeitung erfolgreich war
-        try:
-            os.remove(zip_path)
-            print(f"ZIP-Datei gelöscht: {zip_path}")
-        except Exception as e:
-            print(f"Warnung: ZIP-Datei konnte nicht gelöscht werden: {e}")
+    if tiff_path and os.path.exists(tiff_path):
+        # Zeige den Speicherort an
+        messagebox.showinfo("Erfolg", 
+            f"TIFF-Datei erfolgreich erstellt:\n{tiff_path}\n\n"
+            "Die Datei befindet sich im Unterordner 'amazon_order_downloads'.")
+        
+        # Öffne den Explorer im Zielordner
+        os.startfile(os.path.dirname(tiff_path))
+    else:
+        messagebox.showerror("Fehler", "TIFF-Datei konnte nicht erstellt werden.")
+
+def process_files(extract_dir, order_number):
+    """Verarbeite die SVG und JPG Dateien zu TIFF"""
+    try:
+        # Finde die SVG-Datei und die größte JPG-Datei
+        svg_file = None
+        jpg_files = []
+        
+        for root, dirs, files in os.walk(extract_dir):
+            for file in files:
+                if file.lower().endswith('.svg'):
+                    svg_file = os.path.join(root, file)
+                elif file.lower().endswith('.jpg') or file.lower().endswith('.jpeg'):
+                    jpg_files.append(os.path.join(root, file))
+        
+        if not svg_file:
+            messagebox.showerror("Fehler", "Keine SVG-Datei in der ZIP-Datei gefunden.")
+            return None
+            
+        if not jpg_files:
+            messagebox.showerror("Fehler", "Keine JPG-Dateien in der ZIP-Datei gefunden.")
+            return None
+        
+        largest_jpg = max(jpg_files, key=lambda f: os.path.getsize(f)))
+        
+        # 1. SVG modifizieren mit dem eingebetteten Bild
+        new_svg_path = embed_image_in_svg(largest_jpg, svg_file)
+        if not new_svg_path:
+            return None
+        
+        # 2. Konvertiere zu TIFF (im gleichen Verzeichnis)
+        output_path = os.path.join(extract_dir, f"{order_number}.tiff")
+        if convert_svg_to_tiff(new_svg_path, output_path):
+            return output_path
+        return None
+        
+    except Exception as e:
+        messagebox.showerror("Fehler", f"Verarbeitung fehlgeschlagen: {str(e)}")
+        return None
 
 # === Verarbeite SVG und JPG zu TIFF ===
 def process_files(svg_path, image_path, output_dir, order_number):
