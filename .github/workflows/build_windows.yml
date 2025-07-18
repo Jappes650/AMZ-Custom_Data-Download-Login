@@ -89,7 +89,7 @@ jobs:
       shell: pwsh
       run: |
         # Build with comprehensive Cairo support
-        pyinstaller --onefile `
+        pyinstaller --noconsole --onefile `
           --add-data "drivers/chromedriver.exe;drivers" `
           --add-data "amazon_cookies.pkl;." `
           --add-data "amazon_session_info.json;." `
