@@ -75,199 +75,382 @@ def create_driver():
 
 # === Session-Info speichern ===
 def save_session_info(driver):
-    session_info = {
-        "url": driver.current_url,
-        "timestamp": datetime.now().isoformat(),
-        "user_agent": driver.execute_script("return navigator.userAgent;")
-    }
-    
-    with open(SESSION_FILE, "w") as file:
-        json.dump(session_info, file)
+    try:
+        session_info = {
+            "url": driver.current_url,
+            "timestamp": datetime.now().isoformat(),
+            "user_agent": driver.execute_script("return navigator.userAgent;")
+        }
+        
+        with open(SESSION_FILE, "w") as file:
+            json.dump(session_info, file)
+        print(f"Session-Info gespeichert: {SESSION_FILE}")
+        return True
+    except Exception as e:
+        print(f"Fehler beim Speichern der Session-Info: {e}")
+        return False
 
 # === Session-Info laden ===
 def load_session_info():
     if os.path.exists(SESSION_FILE):
-        with open(SESSION_FILE, "r") as file:
-            return json.load(file)
+        try:
+            with open(SESSION_FILE, "r") as file:
+                return json.load(file)
+        except Exception as e:
+            print(f"Fehler beim Laden der Session-Info: {e}")
     return None
 
 # === Cookies speichern ===
 def save_cookies(driver):
     try:
-        # Verify browser is still connected
+        print("Starte Cookie-Speicherung...")
+        
+        # Warte kurz um sicherzustellen, dass die Seite vollständig geladen ist
+        time.sleep(2)
+        
+        # Prüfe Browser-Verbindung
         try:
-            driver.current_url  # Simple check if browser is alive
-        except:
-            print("Browser disconnected, cannot save cookies")
+            current_url = driver.current_url
+            print(f"Aktuelle URL: {current_url}")
+        except Exception as e:
+            print(f"Browser-Verbindung verloren: {e}")
             return False
-            
-        # Get and filter cookies
+        
+        # Hole alle Cookies
         cookies = driver.get_cookies()
-        print(f"Found {len(cookies)} cookies total")
+        print(f"Gefunden: {len(cookies)} Cookies insgesamt")
         
-        relevant_cookies = [
-            cookie for cookie in cookies 
-            if any(domain in cookie.get('domain', '') 
-                for domain in ['amazon.de', 'amazon.com', 'sellercentral'])
-        ]
+        # Filtere relevante Cookies
+        relevant_cookies = []
+        for cookie in cookies:
+            domain = cookie.get('domain', '')
+            if any(keyword in domain for keyword in ['amazon.de', 'amazon.com', 'sellercentral']):
+                relevant_cookies.append(cookie)
         
-        print(f"Filtered to {len(relevant_cookies)} relevant cookies")
+        print(f"Relevante Cookies: {len(relevant_cookies)}")
+        
+        # Zeige Cookie-Details für Debug
+        for cookie in relevant_cookies[:5]:  # Nur die ersten 5 anzeigen
+            print(f"Cookie: {cookie.get('name')} - Domain: {cookie.get('domain')}")
         
         if not relevant_cookies:
-            print("No relevant cookies found to save")
+            print("WARNUNG: Keine relevanten Cookies gefunden!")
             return False
-            
-        # Save cookies
-        try:
-            with open(COOKIE_FILE, "wb") as file:
-                pickle.dump(relevant_cookies, file)
-            print(f"Cookies saved to {os.path.abspath(COOKIE_FILE)}")
-            
-            # Save session info
-            save_session_info(driver)
-            return True
-            
-        except Exception as e:
-            print(f"Error saving cookies: {str(e)}")
-            return False
-            
+        
+        # Speichere Cookies
+        with open(COOKIE_FILE, "wb") as file:
+            pickle.dump(relevant_cookies, file)
+        print(f"Cookies gespeichert in: {os.path.abspath(COOKIE_FILE)}")
+        
+        # Speichere Session-Info
+        if save_session_info(driver):
+            print("Session-Info erfolgreich gespeichert")
+        
+        return True
+        
     except Exception as e:
-        print(f"Exception in save_cookies: {str(e)}")
+        print(f"FEHLER beim Speichern der Cookies: {e}")
         return False
 
 # === Cookies laden ===
 def load_cookies(driver):
     if not os.path.exists(COOKIE_FILE):
+        print("Cookie-Datei nicht gefunden")
         return False
     
     try:
         with open(COOKIE_FILE, "rb") as file:
             cookies = pickle.load(file)
+        
+        print(f"Cookies geladen: {len(cookies)} Stück")
 
         # Prüfe ob Cookies noch gültig sind
         session_info = load_session_info()
         if session_info:
             saved_time = datetime.fromisoformat(session_info["timestamp"])
-            if datetime.now() - saved_time > timedelta(hours=12):  # 12 Stunden Gültigkeit
+            time_diff = datetime.now() - saved_time
+            print(f"Cookie-Alter: {time_diff}")
+            
+            if time_diff > timedelta(hours=12):  # 12 Stunden Gültigkeit
                 print("Cookies sind abgelaufen")
                 return False
 
         # Gehe erst zur Login-Seite, bevor Cookies gesetzt werden
         driver.get(LOGIN_URL)
-        time.sleep(2)
+        time.sleep(3)
 
+        # Setze Cookies
+        cookies_set = 0
         for cookie in cookies:
-            # Bereinige Cookie-Daten
-            cookie.pop('sameSite', None)
-            cookie.pop('httpOnly', None)
-            cookie.pop('secure', None)
-            
-            # Stelle sicher, dass die Domain korrekt ist
-            if 'domain' not in cookie or not cookie['domain']:
-                cookie['domain'] = '.amazon.de'
-            
             try:
-                driver.add_cookie(cookie)
+                # Bereinige Cookie-Daten
+                clean_cookie = {
+                    'name': cookie.get('name'),
+                    'value': cookie.get('value'),
+                    'domain': cookie.get('domain', '.amazon.de'),
+                    'path': cookie.get('path', '/'),
+                }
+                
+                # Füge optionale Attribute hinzu, falls vorhanden
+                if 'expiry' in cookie:
+                    clean_cookie['expiry'] = cookie['expiry']
+                
+                driver.add_cookie(clean_cookie)
+                cookies_set += 1
+                
             except Exception as e:
                 print(f"Cookie konnte nicht gesetzt werden: {cookie.get('name')} - {e}")
         
-        return True
+        print(f"Erfolgreich {cookies_set} Cookies gesetzt")
+        return cookies_set > 0
+        
     except Exception as e:
         print(f"Fehler beim Laden der Cookies: {e}")
         return False
 
-# === Login-Status prüfen ===
+# === Verbesserter Login-Status Check ===
 def is_logged_in(driver):
     try:
-        # Wait for page to load
-        WebDriverWait(driver, 15).until(
+        print("Prüfe Login-Status...")
+        
+        # Warte auf vollständiges Laden der Seite
+        WebDriverWait(driver, 20).until(
             lambda d: d.execute_script("return document.readyState") == "complete"
         )
         
         current_url = driver.current_url
-        print(f"Login check - Current URL: {current_url}")
+        print(f"Aktuelle URL: {current_url}")
         
-        # Check if we're still on a login page
-        if any(keyword in current_url.lower() for keyword in ["signin", "login", "auth"]):
-            print("Login page detected")
-            return False
+        # Prüfe verschiedene Login-Indikatoren
+        login_indicators = [
+            # Negative Indikatoren (deuten auf Login-Seite hin)
+            ("signin", False),
+            ("login", False),
+            ("auth", False),
+            ("ap/signin", False),
             
-        # Special case for Amazon's redirect flow
-        if "home?mons_sel_mkid" in current_url:
-            print("Detected Amazon post-login redirect")
-            return True
-            
-        # Check for dashboard elements
-        try:
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div.sc-dashboard, input#sc-search-field"))
-            )
-            print("Dashboard elements found")
-            return True
-        except:
-            pass
-            
+            # Positive Indikatoren (deuten auf erfolgreichen Login hin)
+            ("sellercentral.amazon.de/home", True),
+            ("sellercentral.amazon.de/hz", True),
+            ("sellercentral.amazon.de/inventory", True),
+            ("sellercentral.amazon.de/orders", True),
+        ]
+        
+        for indicator, is_positive in login_indicators:
+            if indicator in current_url.lower():
+                print(f"Gefunden: {indicator} ({'Positiv' if is_positive else 'Negativ'})")
+                return is_positive
+        
+        # Prüfe auf Dashboard-Elemente
+        dashboard_selectors = [
+            "input#sc-search-field",
+            "div.sc-dashboard",
+            "div.dashboard-container",
+            "nav.sc-nav",
+            "[data-testid='dashboard']"
+        ]
+        
+        for selector in dashboard_selectors:
+            try:
+                element = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                )
+                print(f"Dashboard-Element gefunden: {selector}")
+                return True
+            except:
+                continue
+        
+        # Prüfe auf Login-Formular (negativ)
+        login_selectors = [
+            "input[name='email']",
+            "input[name='password']",
+            "input[type='email']",
+            "form#ap_signin_form"
+        ]
+        
+        for selector in login_selectors:
+            try:
+                driver.find_element(By.CSS_SELECTOR, selector)
+                print(f"Login-Formular gefunden: {selector}")
+                return False
+            except:
+                continue
+        
+        print("Login-Status unbekannt - wahrscheinlich nicht eingeloggt")
         return False
         
     except Exception as e:
-        print(f"Login check error: {str(e)}")
+        print(f"Fehler bei Login-Status-Prüfung: {e}")
         return False
 
-# === Login durchführen (manuell) ===
+# === Verbesserte manuelle Login-Funktion ===
 def manual_login():
     driver = None
-    login_success = False
     
     try:
-        # Initialize driver
-        driver = create_driver()
-        driver.get(LOGIN_URL)
+        print("Starte manuellen Login-Prozess...")
         
-        # Show login instructions
+        # Driver initialisieren
+        driver = create_driver()
+        print("Browser gestartet")
+        
+        # Zur Login-Seite navigieren
+        driver.get(LOGIN_URL)
+        print("Zur Login-Seite navigiert")
+        
+        # Zeige Login-Anweisungen
         messagebox.showinfo(
-            "Login erforderlich", 
-            "Bitte logge dich jetzt manuell ein (inkl. 2FA).\n\n"
-            "Wichtig:\n"
-            "- Stelle sicher, dass du komplett eingeloggt bist\n"
-            "- Warte bis die Seller Central Startseite geladen ist\n"
-            "- Drücke erst dann OK"
+            "Manueller Login erforderlich", 
+            "Bitte führe den Login jetzt durch:\n\n"
+            "1. Gib deine Amazon-Anmeldedaten ein\n"
+            "2. Führe die 2-Faktor-Authentifizierung durch\n"
+            "3. Warte bis du zur Seller Central Startseite gelangst\n"
+            "4. Klicke dann auf 'Login abgeschlossen' in diesem Fenster\n\n"
+            "Hinweis: Das Browser-Fenster bleibt offen bis du bestätigst!"
         )
         
-        # Wait for user to complete login (5 minute timeout)
-        try:
-            WebDriverWait(driver, 300).until(
-                lambda d: is_logged_in(d)
-            )
-            login_success = True
-        except Exception as e:
-            print(f"Login wait timeout/error: {str(e)}")
-            login_success = is_logged_in(driver)  # Final check
-            
-        # Debug output
-        print(f"Final login status: {login_success}")
-        print(f"Current URL: {driver.current_url}")
+        # Warte auf Benutzer-Bestätigung mit Dialog
+        root = tk.Tk()
+        root.withdraw()  # Verstecke das Hauptfenster
         
-        # Save cookies if possible
+        login_confirmed = False
+        
+        def confirm_login():
+            nonlocal login_confirmed
+            login_confirmed = True
+            confirmation_window.destroy()
+        
+        def cancel_login():
+            nonlocal login_confirmed
+            login_confirmed = False
+            confirmation_window.destroy()
+        
+        # Erstelle Bestätigungsfenster
+        confirmation_window = tk.Toplevel(root)
+        confirmation_window.title("Login-Bestätigung")
+        confirmation_window.geometry("400x200")
+        confirmation_window.grab_set()  # Modal window
+        
+        tk.Label(confirmation_window, 
+                text="Bist du erfolgreich eingeloggt?", 
+                font=("Arial", 12)).pack(pady=20)
+        
+        tk.Label(confirmation_window, 
+                text="Klicke nur auf 'Login abgeschlossen' wenn du\n"
+                     "komplett eingeloggt bist und die Seller Central\n"
+                     "Startseite siehst!", 
+                font=("Arial", 10)).pack(pady=10)
+        
+        button_frame = tk.Frame(confirmation_window)
+        button_frame.pack(pady=20)
+        
+        tk.Button(button_frame, 
+                 text="Login abgeschlossen", 
+                 command=confirm_login, 
+                 bg="green", 
+                 fg="white",
+                 font=("Arial", 12)).pack(side=tk.LEFT, padx=10)
+        
+        tk.Button(button_frame, 
+                 text="Abbrechen", 
+                 command=cancel_login, 
+                 bg="red", 
+                 fg="white",
+                 font=("Arial", 12)).pack(side=tk.LEFT, padx=10)
+        
+        # Warte auf Benutzer-Entscheidung
+        root.wait_window(confirmation_window)
+        
+        if not login_confirmed:
+            print("Login abgebrochen durch Benutzer")
+            messagebox.showinfo("Abgebrochen", "Login-Prozess wurde abgebrochen.")
+            return
+        
+        print("Login-Bestätigung erhalten, prüfe Status...")
+        
+        # Prüfe Login-Status
+        login_success = is_logged_in(driver)
+        print(f"Login-Status: {login_success}")
+        
         if login_success:
+            print("Login erfolgreich erkannt, speichere Cookies...")
+            
+            # Speichere Cookies
             if save_cookies(driver):
-                messagebox.showinfo("Erfolg", "Login erfolgreich & Cookies gespeichert!")
+                messagebox.showinfo("Erfolg!", 
+                    "Login erfolgreich abgeschlossen!\n\n"
+                    "Cookies wurden gespeichert und sind ca. 12 Stunden gültig.\n"
+                    "Du kannst jetzt Bestellungen suchen.")
+                print("Cookie-Speicherung erfolgreich")
             else:
-                messagebox.showerror("Fehler", "Login erfolgreich aber Cookies konnten nicht gespeichert werden!")
+                messagebox.showwarning("Teilweise erfolgreich", 
+                    "Login war erfolgreich, aber Cookies konnten nicht gespeichert werden.\n"
+                    "Du musst dich beim nächsten Mal erneut einloggen.")
+                print("Cookie-Speicherung fehlgeschlagen")
         else:
-            messagebox.showwarning("Warnung", 
-                "Login scheint nicht vollständig zu sein.\n"
-                "Bitte versuche es erneut und stelle sicher, dass du komplett eingeloggt bist.")
-                
+            messagebox.showwarning("Login unvollständig", 
+                "Der Login scheint nicht vollständig zu sein.\n\n"
+                "Bitte stelle sicher, dass du:\n"
+                "- Vollständig eingeloggt bist\n"
+                "- Die Seller Central Startseite siehst\n"
+                "- Alle 2FA-Schritte abgeschlossen hast\n\n"
+                "Versuche es erneut.")
+            print("Login-Status negativ")
+        
     except Exception as e:
-        messagebox.showerror("Kritischer Fehler", f"Login-Prozess fehlgeschlagen: {str(e)}")
+        error_msg = f"Kritischer Fehler beim Login: {str(e)}"
+        print(error_msg)
+        messagebox.showerror("Fehler", error_msg)
+        
     finally:
+        # Browser nur schließen wenn der Benutzer es bestätigt hat
         if driver:
             try:
-                print("Attempting to close browser...")
+                print("Schließe Browser...")
                 driver.quit()
-                print("Browser closed successfully")
+                print("Browser erfolgreich geschlossen")
             except Exception as e:
-                print(f"Error closing browser: {str(e)}")
+                print(f"Fehler beim Schließen des Browsers: {e}")
+
+# === Cookie-Status prüfen ===
+def check_cookie_status():
+    if not os.path.exists(COOKIE_FILE):
+        messagebox.showinfo("Cookie-Status", "❌ Keine Cookies gespeichert.\n\nBitte logge dich zuerst manuell ein.")
+        return
+    
+    try:
+        # Lade Cookie-Datei
+        with open(COOKIE_FILE, "rb") as file:
+            cookies = pickle.load(file)
+        
+        session_info = load_session_info()
+        
+        if session_info:
+            saved_time = datetime.fromisoformat(session_info["timestamp"])
+            time_diff = datetime.now() - saved_time
+            
+            hours_old = time_diff.total_seconds() / 3600
+            
+            status = f"✅ Cookies gefunden!\n\n"
+            status += f"Anzahl: {len(cookies)} Cookies\n"
+            status += f"Gespeichert: {saved_time.strftime('%d.%m.%Y um %H:%M:%S')}\n"
+            status += f"Alter: {int(hours_old)} Stunden\n\n"
+            
+            if time_diff > timedelta(hours=12):
+                status += "⚠️ Status: Abgelaufen\n\n(Cookies sind älter als 12 Stunden)"
+            else:
+                remaining_hours = 12 - int(hours_old)
+                status += f"✅ Status: Gültig\n\n(Noch {remaining_hours} Stunden gültig)"
+            
+            messagebox.showinfo("Cookie-Status", status)
+        else:
+            messagebox.showinfo("Cookie-Status", 
+                f"⚠️ Cookies gefunden ({len(cookies)} Stück)\n\n"
+                "Aber keine Session-Info vorhanden.\n"
+                "Eventuell solltest du dich neu einloggen.")
+    
+    except Exception as e:
+        messagebox.showerror("Fehler", f"Fehler beim Prüfen der Cookies:\n{str(e)}")
 
 # === Verarbeite heruntergeladene ZIP-Datei ===
 def process_downloaded_zip(order_number):
@@ -329,7 +512,6 @@ def process_downloaded_zip(order_number):
         except Exception as e:
             print(f"Warnung: ZIP-Datei konnte nicht gelöscht werden: {e}")
 
-
 # === Verarbeite SVG und JPG zu TIFF ===
 def process_files(svg_path, image_path, output_dir, order_number):
     """Verarbeite die SVG und JPG Dateien zu TIFF"""
@@ -348,7 +530,6 @@ def process_files(svg_path, image_path, output_dir, order_number):
     except Exception as e:
         messagebox.showerror("Fehler", f"Verarbeitung fehlgeschlagen: {str(e)}")
         return False
-
 
 def embed_image_in_svg(image_path, svg_path):
     """Ersetzt nur das Bild innerhalb des clipPath"""
