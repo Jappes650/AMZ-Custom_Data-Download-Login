@@ -18,6 +18,7 @@ from PIL import Image
 import base64
 from lxml import etree
 import shutil
+import sys
 
 # === Globale Variablen ===
 
@@ -357,12 +358,37 @@ def check_cookie_status():
     except Exception as e:
         messagebox.showerror("Fehler", f"Fehler beim Prüfen der Cookies:\n{str(e)}")
 
-# === Verarbeite heruntergeladene ZIP-Datei ===
-def process_downloaded_zip(order_number):
-    # Warte auf den Download
-    time.sleep(5)
+# === Warte auf Download-Vollendung ===
+def wait_for_download_completion(download_dir, timeout=30):
+    """Warte bis der Download vollständig ist"""
+    start_time = time.time()
     
-    # Finde die neueste ZIP-Datei im DOWNLOAD_DIR (nicht im temporären Verzeichnis)
+    while time.time() - start_time < timeout:
+        # Prüfe ob .crdownload Dateien vorhanden sind (unvollständige Downloads)
+        partial_files = [f for f in os.listdir(download_dir) if f.endswith('.crdownload')]
+        if not partial_files:
+            # Prüfe ob mindestens eine ZIP-Datei vorhanden ist
+            zip_files = [f for f in os.listdir(download_dir) if f.endswith('.zip')]
+            if zip_files:
+                # Zusätzliche Wartezeit für Datei-Stabilität
+                time.sleep(2)
+                return True
+        
+        time.sleep(1)
+    
+    return False
+
+# === Verbesserte Funktion zur Verarbeitung der ZIP-Datei ===
+def process_downloaded_zip(order_number):
+    """Verarbeite die heruntergeladene ZIP-Datei"""
+    print(f"=== Starte Verarbeitung für Bestellung: {order_number} ===")
+    
+    # Warte auf Download-Vollendung
+    if not wait_for_download_completion(DOWNLOAD_DIR, timeout=30):
+        messagebox.showerror("Fehler", "Download wurde nicht rechtzeitig abgeschlossen.")
+        return
+    
+    # Finde die neueste ZIP-Datei
     zip_files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.zip')]
     if not zip_files:
         messagebox.showerror("Fehler", f"Keine ZIP-Datei gefunden in: {DOWNLOAD_DIR}")
@@ -371,7 +397,9 @@ def process_downloaded_zip(order_number):
     latest_zip = max(zip_files, key=lambda f: os.path.getmtime(os.path.join(DOWNLOAD_DIR, f)))
     zip_path = os.path.join(DOWNLOAD_DIR, latest_zip)
     
-    # Erstelle einen Ordner für die entpackten Dateien im DOWNLOAD_DIR
+    print(f"Gefundene ZIP-Datei: {zip_path}")
+    
+    # Erstelle Ordner für entpackte Dateien
     extract_dir = os.path.join(DOWNLOAD_DIR, order_number)
     
     if os.path.exists(extract_dir):
@@ -379,21 +407,35 @@ def process_downloaded_zip(order_number):
     os.makedirs(extract_dir)
     
     try:
+        # Entpacke ZIP-Datei
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(extract_dir)
         print(f"Dateien entpackt nach: {extract_dir}")
+        
+        # Liste alle entpackten Dateien
+        print("Entpackte Dateien:")
+        for root, dirs, files in os.walk(extract_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                print(f"  - {file_path}")
+        
     except Exception as e:
-        messagebox.showerror("Fehler", f"Fehler beim Entpacken der ZIP-Datei: {e}\nPfad: {zip_path}")
+        messagebox.showerror("Fehler", f"Fehler beim Entpacken der ZIP-Datei: {e}")
         return
     
-    # Verarbeite die Dateien
-    tiff_path = process_files(extract_dir, order_number)
+    # Verarbeite die Dateien zu TIFF
+    tiff_path = process_files_to_tiff(extract_dir, order_number)
     
     if tiff_path and os.path.exists(tiff_path):
         messagebox.showinfo("Erfolg", 
             f"TIFF-Datei erfolgreich erstellt:\n{tiff_path}\n\n"
-            "Die Datei befindet sich im Unterordner 'amazon_order_downloads'.")
-        os.startfile(os.path.dirname(tiff_path))
+            "Die Datei befindet sich im 'amazon_order_downloads' Ordner.")
+        
+        # Öffne den Ordner mit der TIFF-Datei
+        try:
+            os.startfile(os.path.dirname(tiff_path))
+        except:
+            pass  # Falls startfile nicht verfügbar ist
     else:
         messagebox.showerror("Fehler", "TIFF-Datei konnte nicht erstellt werden.")
     
@@ -404,19 +446,25 @@ def process_downloaded_zip(order_number):
     except Exception as e:
         print(f"Warnung: ZIP-Datei konnte nicht gelöscht werden: {e}")
 
-def process_files(extract_dir, order_number):
-    """Verarbeite die SVG und JPG Dateien zu TIFF"""
+# === Korrigierte Funktion zur Dateiverarbeitung ===
+def process_files_to_tiff(extract_dir, order_number):
+    """Verarbeite SVG und JPG Dateien zu TIFF"""
     try:
-        # Finde die SVG-Datei und die größte JPG-Datei
+        print(f"=== Starte Dateiverarbeitung für {order_number} ===")
+        
+        # Finde SVG und JPG Dateien
         svg_file = None
         jpg_files = []
         
         for root, dirs, files in os.walk(extract_dir):
             for file in files:
+                file_path = os.path.join(root, file)
                 if file.lower().endswith('.svg'):
-                    svg_file = os.path.join(root, file)
-                elif file.lower().endswith('.jpg') or file.lower().endswith('.jpeg'):
-                    jpg_files.append(os.path.join(root, file))
+                    svg_file = file_path
+                    print(f"SVG gefunden: {file_path}")
+                elif file.lower().endswith(('.jpg', '.jpeg')):
+                    jpg_files.append(file_path)
+                    print(f"JPG gefunden: {file_path}")
         
         if not svg_file:
             messagebox.showerror("Fehler", "Keine SVG-Datei in der ZIP-Datei gefunden.")
@@ -426,122 +474,126 @@ def process_files(extract_dir, order_number):
             messagebox.showerror("Fehler", "Keine JPG-Dateien in der ZIP-Datei gefunden.")
             return None
         
+        # Wähle die größte JPG-Datei
         largest_jpg = max(jpg_files, key=lambda f: os.path.getsize(f))
+        print(f"Größte JPG-Datei: {largest_jpg} ({os.path.getsize(largest_jpg)} Bytes)")
         
-        # 1. SVG modifizieren mit dem eingebetteten Bild
-        new_svg_path = embed_image_in_svg(largest_jpg, svg_file)
-        if not new_svg_path:
+        # Bette Bild in SVG ein
+        modified_svg = embed_image_in_svg(largest_jpg, svg_file)
+        if not modified_svg:
             return None
         
-        # 2. Konvertiere zu TIFF (im gleichen Verzeichnis)
+        # Konvertiere zu TIFF
         output_path = os.path.join(extract_dir, f"{order_number}.tiff")
-        if convert_svg_to_tiff(new_svg_path, output_path):
+        if convert_svg_to_tiff(modified_svg, output_path):
+            print(f"TIFF erfolgreich erstellt: {output_path}")
             return output_path
+        
         return None
         
     except Exception as e:
+        print(f"Fehler bei der Dateiverarbeitung: {e}")
         messagebox.showerror("Fehler", f"Verarbeitung fehlgeschlagen: {str(e)}")
         return None
-
-# === Verarbeite SVG und JPG zu TIFF ===
-def process_files(svg_path, image_path, output_dir, order_number):
-    """Verarbeite die SVG und JPG Dateien zu TIFF"""
-    try:
-        # 1. SVG modifizieren mit dem eingebetteten Bild
-        new_svg_path = embed_image_in_svg(image_path, svg_path)
-        if not new_svg_path:
-            return False
-        
-        # 2. Konvertiere zu TIFF (mit Bestellnummer als Dateiname)
-        output_path = os.path.join(output_dir, f"{order_number}.tiff")
-        if convert_svg_to_tiff(new_svg_path, output_path):
-            return True
-        return False
-        
-    except Exception as e:
-        messagebox.showerror("Fehler", f"Verarbeitung fehlgeschlagen: {str(e)}")
-        return False
 
 def embed_image_in_svg(image_path, svg_path):
-    """Ersetzt nur das Bild innerhalb des clipPath"""
+    """Ersetzt das Bild innerhalb des clipPath"""
     try:
-        with open(svg_path, "r+b") as f:
+        print(f"=== Bette Bild ein: {image_path} in {svg_path} ===")
+        
+        # Lese SVG-Datei
+        with open(svg_path, "rb") as f:
             tree = etree.parse(f)
             root = tree.getroot()
 
-            namespaces = {
-                'svg': 'http://www.w3.org/2000/svg',
-                'xlink': 'http://www.w3.org/1999/xlink'
-            }
+        namespaces = {
+            'svg': 'http://www.w3.org/2000/svg',
+            'xlink': 'http://www.w3.org/1999/xlink'
+        }
 
-            # Finde das Bild-Element innerhalb des clipPath
-            clip_path_images = root.xpath('//svg:g[@clip-path]//svg:image', namespaces=namespaces)
-            
-            if not clip_path_images:
-                raise Exception("Kein Bild im clipPath gefunden")
-                
-            # Das große Bild im clipPath (3960x2640)
-            target_image = clip_path_images[0]
+        # Finde das Bild-Element innerhalb des clipPath
+        clip_path_images = root.xpath('//svg:g[@clip-path]//svg:image', namespaces=namespaces)
+        
+        if not clip_path_images:
+            print("Kein Bild im clipPath gefunden, suche nach allen Bildern...")
+            # Fallback: Suche nach allen Bildern
+            all_images = root.xpath('//svg:image', namespaces=namespaces)
+            if all_images:
+                clip_path_images = all_images[:1]  # Nimm das erste Bild
+            else:
+                raise Exception("Keine Bild-Elemente in der SVG gefunden")
+        
+        # Das Ziel-Bild (normalerweise das große Bild)
+        target_image = clip_path_images[0]
+        print(f"Ziel-Bild-Element gefunden: {target_image.get('width')}x{target_image.get('height')}")
 
-            with open(image_path, "rb") as img_file:
-                encoded_string = "data:image/png;base64," + base64.b64encode(img_file.read()).decode('utf-8')
+        # Lade und kodiere das Bild
+        with open(image_path, "rb") as img_file:
+            encoded_string = "data:image/jpeg;base64," + base64.b64encode(img_file.read()).decode('utf-8')
 
-            target_image.set("{http://www.w3.org/1999/xlink}href", encoded_string)
+        # Setze das neue Bild
+        target_image.set("{http://www.w3.org/1999/xlink}href", encoded_string)
+        print("Bild erfolgreich eingebettet")
 
-            new_svg_path = os.path.splitext(svg_path)[0] + "_temp.svg"  # Als temporäre Datei markiert
-            with open(new_svg_path, "wb") as new_svg:
-                new_svg.write(etree.tostring(tree, pretty_print=True, encoding="UTF-8"))
+        # Speichere die modifizierte SVG
+        new_svg_path = os.path.splitext(svg_path)[0] + "_modified.svg"
+        with open(new_svg_path, "wb") as new_svg:
+            new_svg.write(etree.tostring(tree, pretty_print=True, encoding="UTF-8"))
 
-            return new_svg_path
+        print(f"Modifizierte SVG gespeichert: {new_svg_path}")
+        return new_svg_path
 
     except Exception as e:
+        print(f"Fehler bei der Bildeinbettung: {e}")
         messagebox.showerror("Fehler", f"Bildeinbettung fehlgeschlagen: {str(e)}")
         return None
 
-def convert_svg_to_tiff(svg_path, output_path=None):
-    """Konvertiere SVG direkt zu TIFF und lösche temporäre Dateien"""
+def convert_svg_to_tiff(svg_path, output_path):
+    """Konvertiere SVG zu TIFF"""
     try:
-        if output_path is None:
-            output_path = os.path.splitext(svg_path)[0].replace("_temp", "") + ".tiff"
-
-        # 1. Konvertiere zu PNG
+        print(f"=== Konvertiere SVG zu TIFF: {svg_path} -> {output_path} ===")
+        
+        # Temporärer PNG-Pfad
         png_path = os.path.splitext(output_path)[0] + "_temp.png"
+        
+        # Konvertiere SVG zu PNG
         cairosvg.svg2png(
             url=svg_path,
             write_to=png_path,
             background_color=None,
-            scale=1.0  # Keine Skalierung
+            scale=1.0
         )
+        print("SVG zu PNG konvertiert")
 
-        # 2. Öffne das PNG und entferne Transparenz durch Cropping
+        # Öffne PNG und verarbeite es
         img = Image.open(png_path)
+        print(f"PNG geöffnet: {img.size}, Modus: {img.mode}")
         
+        # Entferne Transparenz durch Cropping
         if img.mode in ('RGBA', 'LA'):
-            # Finde die Bounding Box des nicht-transparenten Bereichs
             bbox = img.getbbox()
-            
             if bbox:
-                # Schneide das Bild auf den nicht-transparenten Bereich zu
                 img = img.crop(bbox)
+                print(f"Bild beschnitten auf: {img.size}")
             else:
-                messagebox.showerror("Fehler", "Das Bild enthält nur transparente Pixel")
-                return False
+                print("Warnung: Bild enthält nur transparente Pixel")
 
-        # 3. Konvertiere PNG zu TIFF
-        img.save(
-            output_path,
-            format="TIFF",
-            compression="tiff_deflate"
-        )
+        # Speichere als TIFF
+        img.save(output_path, format="TIFF", compression="tiff_deflate")
+        print(f"TIFF gespeichert: {output_path}")
         
         # Lösche temporäre Dateien
-        os.remove(png_path)
-        os.remove(svg_path)  # Lösche die temporäre SVG-Datei
+        try:
+            os.remove(png_path)
+            os.remove(svg_path)  # Lösche die modifizierte SVG
+            print("Temporäre Dateien gelöscht")
+        except Exception as e:
+            print(f"Warnung: Temporäre Dateien konnten nicht gelöscht werden: {e}")
 
-        messagebox.showinfo("Erfolg", f"TIFF erfolgreich erstellt:\n{output_path}")
         return True
 
     except Exception as e:
+        print(f"Fehler bei der TIFF-Konvertierung: {e}")
         messagebox.showerror("Fehler", f"Konvertierung fehlgeschlagen: {str(e)}")
         return False
 
@@ -550,10 +602,11 @@ def search_order(order_number):
     driver = create_driver()
     
     try:
+        print(f"=== Starte Suche nach Bestellung: {order_number} ===")
+        
         # Cookies laden und prüfen
         if not load_cookies(driver):
             messagebox.showerror("Fehler", "Keine gültigen Cookies gefunden. Bitte logge dich zuerst manuell ein.")
-            driver.quit()
             return
 
         # Seite neu laden um Login zu aktivieren
@@ -567,43 +620,71 @@ def search_order(order_number):
         # Wenn wir auf Login-Seite sind, Session ist abgelaufen
         if any(keyword in current_url.lower() for keyword in ["signin", "login", "auth"]):
             messagebox.showerror("Session abgelaufen", "Deine Session ist abgelaufen. Bitte logge dich erneut ein.")
-            driver.quit()
             return
 
-        # Prüfen ob Account-Auswahlfenster erscheint (Deutschland auswählen)
+        # Prüfen auf Account-Auswahlfenster (Deutschland auswählen)
         try:
-            # Warte auf das Account-Auswahlfenster
-            germany_button = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, 'button.full-page-account-switcher-account-details span.full-page-account-switcher-account-label'))
-            )
-
-            # Alternative Suche falls das erste nicht funktioniert
-            if "Deutschland" not in germany_button.text:
-                buttons = driver.find_elements(By.CSS_SELECTOR, 'button.full-page-account-switcher-account-details')
-                for btn in buttons:
-                    if "Deutschland" in btn.text:
-                        germany_button = btn
+            print("Prüfe auf Account-Auswahlfenster...")
+            # Warte auf Account-Auswahlfenster mit verschiedenen Selektoren
+            germany_selectors = [
+                'button.full-page-account-switcher-account-details span.full-page-account-switcher-account-label',
+                'button.full-page-account-switcher-account-details',
+                '[data-testid="account-switcher-account-details"]',
+                'button[class*="account-switcher"]'
+            ]
+            
+            germany_button = None
+            for selector in germany_selectors:
+                try:
+                    elements = WebDriverWait(driver, 5).until(
+                        EC.presence_of_all_elements_located((By.CSS_SELECTOR, selector))
+                    )
+                    
+                    for element in elements:
+                        if "Deutschland" in element.text or "Germany" in element.text:
+                            germany_button = element
+                            break
+                    
+                    if germany_button:
                         break
-    
-            # Prüfe ob der Button "Deutschland" enthält
-            if "Deutschland" in germany_button.text:
+                        
+                except:
+                    continue
+            
+            if germany_button:
+                print("Deutschland Account gefunden, klicke darauf...")
                 germany_button.click()
-                print("Deutschland Account ausgewählt")
-                time.sleep(2)  # Warte bis die Auswahl wirksam wird
-
-                # Warte auf und klicke den Bestätigungsbutton
-            try:
-                confirm_button = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, 'button.kat-button.full-page-account-switcher-button'))
-                )
-                confirm_button.click()
-                print("Konto-Auswahl bestätigt")
-                time.sleep(2)  # Warte bis die Auswahl wirksam wird
-            except Exception as e:
-                print(f"Bestätigungsbutton nicht gefunden: {str(e)}")
+                time.sleep(2)
+                
+                # Suche nach Bestätigungsbutton mit verschiedenen Selektoren
+                confirm_selectors = [
+                    'button.kat-button.full-page-account-switcher-button',
+                    'button[class*="full-page-account-switcher-button"]',
+                    'button[class*="account-switcher-button"]',
+                    'button.kat-button'
+                ]
+                
+                confirm_button = None
+                for selector in confirm_selectors:
+                    try:
+                        confirm_button = WebDriverWait(driver, 5).until(
+                            EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                        )
+                        break
+                    except:
+                        continue
+                
+                if confirm_button:
+                    print("Bestätigungsbutton gefunden, klicke darauf...")
+                    confirm_button.click()
+                    time.sleep(2)
+                else:
+                    print("Bestätigungsbutton nicht gefunden, versuche trotzdem fortzufahren...")
+            else:
+                print("Kein Deutschland Account-Button gefunden, fahre fort...")
+                
         except Exception as e:
-            # Falls das Fenster nicht erscheint, einfach fortfahren
-            print(f"Kein Account-Auswahlfenster gefunden oder Fehler: {str(e)}")
+            print(f"Account-Auswahl übersprungen: {str(e)}")
             pass
         
         #Suchfeld schneller finden mit explizitem Wait
