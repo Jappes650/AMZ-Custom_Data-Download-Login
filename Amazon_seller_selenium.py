@@ -656,33 +656,38 @@ def search_order(order_number):
                 germany_button.click()
                 time.sleep(2)
                 
-                # Suche nach Bestätigungsbutton mit verschiedenen Selektoren
-                confirm_selectors = [
-                    'button.kat-button.full-page-account-switcher-button',
-                    'button[class*="full-page-account-switcher-button"]',
-                    'button[class*="account-switcher-button"]',
-                    'button.kat-button'
-                ]
                 
-                confirm_button = None
-                for selector in confirm_selectors:
-                    try:
-                        confirm_button = WebDriverWait(driver, 5).until(
-                            EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
-                        )
+            # Suche nach Bestätigungsbutton mit verschiedenen Selektoren (inkl. kat-button)
+            confirm_selectors = [
+                'kat-button[data-test="confirm-selection"]',
+                'kat-button.full-page-account-switcher-button',
+                'button.kat-button.full-page-account-switcher-button',
+                'button[class*="full-page-account-switcher-button"]',
+                'button[class*="account-switcher-button"]',
+                'button.kat-button'
+            ]
+
+            confirm_button = None
+            for selector in confirm_selectors:
+                try:
+                    confirm_button = WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                    )
+                    if confirm_button:
+                        print(f"Bestätigungsbutton gefunden mit Selektor: {selector}")
+                        # Versuche JavaScript-Klick (robuster bei Custom Elements)
+                        driver.execute_script("arguments[0].click();", confirm_button)
+                        time.sleep(2)
                         break
-                    except:
-                        continue
-                
-                if confirm_button:
-                    print("Bestätigungsbutton gefunden, klicke darauf...")
-                    confirm_button.click()
-                    time.sleep(2)
-                else:
-                    print("Bestätigungsbutton nicht gefunden, versuche trotzdem fortzufahren...")
+                except Exception as e:
+                    print(f"Fehler mit Selektor {selector}: {e}")
+                    continue
+
+            if not confirm_button:
+                print("Bestätigungsbutton nicht gefunden, versuche trotzdem fortzufahren...")
             else:
-                print("Kein Deutschland Account-Button gefunden, fahre fort...")
-                
+                print("Bestätigungsbutton wurde erfolgreich geklickt.")
+
         except Exception as e:
             print(f"Account-Auswahl übersprungen: {str(e)}")
             pass
