@@ -20,8 +20,14 @@ from lxml import etree
 import shutil
 
 # === Globale Variablen ===
-COOKIE_FILE = "amazon_cookies.pkl"
-SESSION_FILE = "amazon_session_info.json"
+
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    
+COOKIE_FILE = os.path.join(BASE_DIR, "amazon_cookies.pkl")
+SESSION_FILE = os.path.join(BASE_DIR, "amazon_session_info.json")
 LOGIN_URL = "https://sellercentral.amazon.de"
 SEARCH_FIELD_SELECTOR = 'input#sc-search-field.search-input.search-input-active'
 SEARCH_BUTTON_SELECTOR = 'button.sc-search-button.search-icon-container'
@@ -29,7 +35,7 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 
 # Ermittle das Verzeichnis, in dem das Skript liegt
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DOWNLOAD_DIR = os.path.join(SCRIPT_DIR, "amazon_order_downloads")  # Download-Verzeichnis im Skript-Ordner
+DOWNLOAD_DIR = os.path.join(BASE_DIR, "amazon_order_downloads")
 
 # === Verzeichnis erstellen ===
 if not os.path.exists(DOWNLOAD_DIR):
