@@ -416,7 +416,7 @@ def process_files(extract_dir, order_number):
             messagebox.showerror("Fehler", "Keine JPG-Dateien in der ZIP-Datei gefunden.")
             return None
         
-        largest_jpg = max(jpg_files, key=lambda f: os.path.getsize(f)))
+        largest_jpg = max(jpg_files, key=lambda f: os.path.getsize(f))
         
         # 1. SVG modifizieren mit dem eingebetteten Bild
         new_svg_path = embed_image_in_svg(largest_jpg, svg_file)
