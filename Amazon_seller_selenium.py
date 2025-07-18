@@ -588,7 +588,7 @@ def search_order(order_number):
                 # Warte auf und klicke den Bestätigungsbutton
             try:
                 confirm_button = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, 'button.kat-button--primary.full-page-account-switcher-buttons'))
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, 'button.kat-button.full-page-account-switcher-button'))
                 )
                 confirm_button.click()
                 print("Konto-Auswahl bestätigt")
