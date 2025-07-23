@@ -161,17 +161,6 @@ def load_cookies(driver):
         
         print(f"Cookies geladen: {len(cookies)} Stück")
 
-        # Prüfe ob Cookies noch gültig sind
-        session_info = load_session_info()
-        if session_info:
-            saved_time = datetime.fromisoformat(session_info["timestamp"])
-            time_diff = datetime.now() - saved_time
-            print(f"Cookie-Alter: {time_diff}")
-            
-            if time_diff > timedelta(hours=12):  # 12 Stunden Gültigkeit
-                print("Cookies sind abgelaufen")
-                return False
-
         # Gehe erst zur Login-Seite, bevor Cookies gesetzt werden
         driver.get(LOGIN_URL)
         time.sleep(3)
@@ -293,9 +282,9 @@ def manual_login():
         # Speichere Cookies direkt nach Bestätigung
         if save_cookies(driver):
             messagebox.showinfo("Erfolg!", 
-                "Login erfolgreich abgeschlossen!\n\n"
-                "Cookies wurden gespeichert und sind ca. 12 Stunden gültig.\n"
-                "Du kannst jetzt Bestellungen suchen.")
+            "Login erfolgreich abgeschlossen!\n\n"
+            "Cookies wurden gespeichert und bleiben gültig, bis sie vom Server abgelehnt werden.\n"
+            "Du kannst jetzt Bestellungen suchen.")
             print("Cookie-Speicherung erfolgreich")
         else:
             messagebox.showwarning("Teilweise erfolgreich", 
@@ -341,19 +330,14 @@ def check_cookie_status():
             status += f"Anzahl: {len(cookies)} Cookies\n"
             status += f"Gespeichert: {saved_time.strftime('%d.%m.%Y um %H:%M:%S')}\n"
             status += f"Alter: {int(hours_old)} Stunden\n\n"
-            
-            if time_diff > timedelta(hours=12):
-                status += "⚠️ Status: Abgelaufen\n\n(Cookies sind älter als 12 Stunden)"
-            else:
-                remaining_hours = 12 - int(hours_old)
-                status += f"✅ Status: Gültig\n\n(Noch {remaining_hours} Stunden gültig)"
+            status += "✅ Status: Gültig (kein Ablaufdatum)"
             
             messagebox.showinfo("Cookie-Status", status)
         else:
             messagebox.showinfo("Cookie-Status", 
                 f"⚠️ Cookies gefunden ({len(cookies)} Stück)\n\n"
                 "Aber keine Session-Info vorhanden.\n"
-                "Eventuell solltest du dich neu einloggen.")
+                "Die Cookies sollten trotzdem funktionieren.")
     
     except Exception as e:
         messagebox.showerror("Fehler", f"Fehler beim Prüfen der Cookies:\n{str(e)}")
@@ -784,22 +768,37 @@ def start_gui():
     window.geometry("450x300")
     
     # Titel
-    tk.Label(window, text="Amazon Seller Central", font=("Arial", 16, "bold")).pack(pady=10)
+    tk.Label(window, text="Hinweis: Cookies bleiben gültig bis sie ablaufen", font=("Arial", 9), fg="gray").pack(pady=(20, 5))
     
     # Bestellnummer eingeben
     tk.Label(window, text="Bestellnummer eingeben:", font=("Arial", 12)).pack(pady=5)
     order_entry = tk.Entry(window, font=("Arial", 12), width=35)
     order_entry.pack(pady=5)
+    
+    # Fokus auf das Eingabefeld setzen
+    order_entry.focus_set()
 
-    def handle_search():
-        order_number = order_entry.get().strip()
+    def handle_search(order_number=None):
+        if order_number is None:
+            order_number = order_entry.get().strip()
         if order_number:
             search_order(order_number)
         else:
             messagebox.showwarning("Hinweis", "Bitte eine Bestellnummer eingeben.")
 
+    def on_barcode_input(event):
+        # Der Barcode-Scanner sendet die Daten + Enter
+        # Wir nehmen den aktuellen Inhalt des Feldes (ohne den letzten Zeilenumbruch)
+        barcode = order_entry.get().strip()
+        if barcode:
+            handle_search(barcode)
+
+    # Enter-Taste und Barcode-Eingabe binden
+    order_entry.bind('<Return>', on_barcode_input)
+    
     # Buttons
-    tk.Button(window, text="Bestellung suchen & verarbeiten", command=handle_search, 
+    tk.Button(window, text="Bestellung suchen & verarbeiten", 
+              command=lambda: handle_search(), 
               font=("Arial", 12), bg="#FF9900", fg="black", width=25).pack(pady=10)
     
     tk.Button(window, text="Manuell einloggen & Cookies speichern", command=manual_login,
@@ -811,7 +810,8 @@ def start_gui():
     # Hinweis
     tk.Label(window, text="Hinweis: Cookies sind ca. 12 Stunden gültig", 
              font=("Arial", 9), fg="gray").pack(pady=(20, 5))
-
+    
+    # Automatisch nach Barcode-Eingabe suchen
     window.mainloop()
 
 # === Programmstart ===
