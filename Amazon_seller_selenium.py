@@ -430,13 +430,146 @@ def process_downloaded_zip(order_number):
     except Exception as e:
         print(f"Warnung: ZIP-Datei konnte nicht gelöscht werden: {e}")
 
-# === Korrigierte Funktion zur Dateiverarbeitung ===
+
+def extract_dimensions_and_check_text(extract_dir):
+    """Sucht nach JSON-Datei, extrahiert Druckdimensionen und prüft Verkäufertext"""
+    try:
+        # Suche nach JSON-Dateien
+        json_files = [f for f in os.listdir(extract_dir) if f.lower().endswith('.json')]
+        if not json_files:
+            messagebox.showerror("Fehler", "Keine JSON-Datei im Download gefunden")
+            return None
+        
+        json_path = os.path.join(extract_dir, json_files[0])
+        print(f"Verarbeite JSON-Datei: {json_path}")
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # 1. Prüfe Verkäufertext zuerst
+        seller_message = None
+        if 'customizationInfo' in data:
+            for surface in data['customizationInfo'].get('version3.0', {}).get('surfaces', []):
+                for area in surface.get('areas', []):
+                    if area.get('customizationType') == "TextPrinting" and area.get('label') == "Verkäufer nachricht":
+                        if area.get('text', '').strip():
+                            seller_message = area['text'].strip()
+                            messagebox.showinfo(
+                                "Verkäuferhinweis", 
+                                f"Nachricht vom Verkäufer:\n\n{seller_message}"
+                            )
+        
+        # 2. Suche Druckdimensionen (kritischer Teil)
+        required_dimensions = None
+        
+        # Zuerst in customizationData suchen
+        if 'customizationData' in data:
+            for child in data['customizationData'].get('children', []):
+                for subchild in child.get('children', []):
+                    for item in subchild.get('children', []):
+                        if item.get('type') == "PlacementContainerCustomization":
+                            dims = item.get('dimension', {})
+                            if 'width' in dims and 'height' in dims:
+                                required_dimensions = {
+                                    'width': dims['width'],
+                                    'height': dims['height'],
+                                    'ratio': dims['width'] / dims['height']
+                                }
+                                print(f"Gefundene Druckdimensionen: {dims['width']}x{dims['height']}")
+                                return required_dimensions
+        
+        # Falls nicht gefunden, in customizationInfo suchen
+        if not required_dimensions and 'customizationInfo' in data:
+            for surface in data['customizationInfo'].get('version3.0', {}).get('surfaces', []):
+                for area in surface.get('areas', []):
+                    if area.get('customizationType') == "ImagePrinting":
+                        dims = area.get('Dimensions', {})
+                        if 'width' in dims and 'height' in dims:
+                            required_dimensions = {
+                                'width': dims['width'],
+                                'height': dims['height'],
+                                'ratio': dims['width'] / dims['height']
+                            }
+                            print(f"Gefundene Druckdimensionen (ImagePrinting): {dims['width']}x{dims['height']}")
+                            return required_dimensions
+        
+        if not required_dimensions:
+            messagebox.showwarning(
+                "Warnung", 
+                "Konnte Druckdimensionen nicht automatisch ermitteln.\n"
+                "Standard 360x180 wird verwendet."
+            )
+            return {'width': 360, 'height': 180, 'ratio': 2.0}
+        
+        return required_dimensions
+        
+    except Exception as e:
+        messagebox.showerror("Fehler", f"JSON-Verarbeitung fehlgeschlagen: {str(e)}")
+        return {'width': 360, 'height': 180, 'ratio': 2.0}
+
+def check_and_correct_aspect_ratio(tiff_path, target_ratio, tolerance=0.01):
+    """Überprüft und korrigiert das Bildverhältnis der TIFF-Datei"""
+    try:
+        img = Image.open(tiff_path)
+        current_width, current_height = img.size
+        current_ratio = current_width / current_height
+        
+        print(f"Aktuelle Dimensionen: {current_width}x{current_height}, Verhältnis: {current_ratio:.4f}")
+        print(f"Ziel-Verhältnis: {target_ratio:.4f}")
+        
+        # Prüfe ob Korrektur notwendig ist
+        ratio_diff = abs(current_ratio - target_ratio)
+        if ratio_diff <= tolerance:
+            print("Bildverhältnis ist bereits korrekt")
+            return True
+        
+        print(f"Korrektur notwendig (Abweichung: {ratio_diff:.4f})")
+        
+        # Berechne neue Dimensionen
+        if current_ratio > target_ratio:  # Zu breit
+            new_width = int(current_height * target_ratio)
+            new_height = current_height
+        else:  # Zu hoch
+            new_width = current_width
+            new_height = int(current_width / target_ratio)
+        
+        print(f"Neue Dimensionen: {new_width}x{new_height}")
+        
+        # Führe die Korrektur durch
+        corrected_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # Backup der Originaldatei
+        backup_path = tiff_path.replace('.tiff', '_original.tiff')
+        shutil.copy2(tiff_path, backup_path)
+        
+        # Speichere korrigierte Version
+        corrected_img.save(tiff_path, format="TIFF", compression="tiff_deflate")
+        
+        # Verifiziere das Ergebnis
+        verify_img = Image.open(tiff_path)
+        verify_ratio = verify_img.width / verify_img.height
+        final_diff = abs(verify_ratio - target_ratio)
+        
+        if final_diff <= tolerance:
+            print("Erfolgreich korrigiert!")
+            return True
+        else:
+            print(f"Warnung: Restabweichung {final_diff:.4f}")
+            return False
+            
+    except Exception as e:
+        print(f"Fehler bei der Bildkorrektur: {e}")
+        return False
+
+        
+
+# Aktualisierte process_files_to_tiff Funktion
 def process_files_to_tiff(extract_dir, order_number):
-    """Verarbeite SVG und JPG Dateien zu TIFF"""
+    """Verarbeite SVG und JPG Dateien zu TIFF mit Verhältniskontrolle"""
     try:
         print(f"=== Starte Dateiverarbeitung für {order_number} ===")
         
-        # Finde SVG und JPG Dateien
+        # 1. Finde Dateien
         svg_file = None
         jpg_files = []
         
@@ -445,38 +578,38 @@ def process_files_to_tiff(extract_dir, order_number):
                 file_path = os.path.join(root, file)
                 if file.lower().endswith('.svg'):
                     svg_file = file_path
-                    print(f"SVG gefunden: {file_path}")
                 elif file.lower().endswith(('.jpg', '.jpeg')):
                     jpg_files.append(file_path)
-                    print(f"JPG gefunden: {file_path}")
         
-        if not svg_file:
-            messagebox.showerror("Fehler", "Keine SVG-Datei in der ZIP-Datei gefunden.")
-            return None
-            
-        if not jpg_files:
-            messagebox.showerror("Fehler", "Keine JPG-Dateien in der ZIP-Datei gefunden.")
+        if not svg_file or not jpg_files:
+            messagebox.showerror("Fehler", "SVG oder JPG Dateien fehlen")
             return None
         
-        # Wähle die größte JPG-Datei
+        # 2. Extrahiere Dimensionen
+        dimensions = extract_dimensions_and_check_text(extract_dir)
+        if not dimensions:
+            dimensions = {'width': 360, 'height': 180, 'ratio': 2.0}
+        
+        # 3. Verarbeite Bild
         largest_jpg = max(jpg_files, key=lambda f: os.path.getsize(f))
-        print(f"Größte JPG-Datei: {largest_jpg} ({os.path.getsize(largest_jpg)} Bytes)")
-        
-        # Bette Bild in SVG ein
         modified_svg = embed_image_in_svg(largest_jpg, svg_file)
         if not modified_svg:
             return None
         
-        # Konvertiere zu TIFF
+        # 4. Konvertiere zu TIFF
         output_path = os.path.join(extract_dir, f"{order_number}.tiff")
-        if convert_svg_to_tiff(modified_svg, output_path):
-            print(f"TIFF erfolgreich erstellt: {output_path}")
-            return output_path
+        if not convert_svg_to_tiff(modified_svg, output_path):
+            return None
         
-        return None
+        # 5. Verhältniskontrolle
+        if dimensions and 'ratio' in dimensions:
+            print("Führe Verhältniskontrolle durch...")
+            if not check_and_correct_aspect_ratio(output_path, dimensions['ratio']):
+                messagebox.showwarning("Warnung", "Bildverhältnis konnte nicht perfekt korrigiert werden")
+        
+        return output_path
         
     except Exception as e:
-        print(f"Fehler bei der Dateiverarbeitung: {e}")
         messagebox.showerror("Fehler", f"Verarbeitung fehlgeschlagen: {str(e)}")
         return None
 
