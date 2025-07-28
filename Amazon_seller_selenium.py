@@ -494,18 +494,18 @@ def extract_dimensions_and_check_text(extract_dir):
                             return required_dimensions
         
         if not required_dimensions:
-            messagebox.showwarning(
-                "Warnung", 
-                "Konnte Druckdimensionen nicht automatisch ermitteln.\n"
-                "Standard 360x180 wird verwendet."
+            messagebox.showerror(
+                "Fehler", 
+                "Konnte Druckdimensionen nicht ermitteln.\n"
+                "Die Verarbeitung wird abgebrochen."
             )
-            return {'width': 360, 'height': 180, 'ratio': 2.0}
+            return None
         
         return required_dimensions
         
     except Exception as e:
         messagebox.showerror("Fehler", f"JSON-Verarbeitung fehlgeschlagen: {str(e)}")
-        return {'width': 360, 'height': 180, 'ratio': 2.0}
+        return None
 
 def check_and_correct_aspect_ratio(tiff_path, target_ratio, tolerance=0.01):
     """Überprüft und korrigiert das Bildverhältnis der TIFF-Datei"""
@@ -587,8 +587,8 @@ def process_files_to_tiff(extract_dir, order_number):
         
         # 2. Extrahiere Dimensionen
         dimensions = extract_dimensions_and_check_text(extract_dir)
-        if not dimensions:
-            dimensions = {'width': 360, 'height': 180, 'ratio': 2.0}
+        if not dimensions:  # Wenn keine Dimensionen gefunden wurden
+            return None  # Verarbeitung abbrechen
         
         # 3. Verarbeite Bild
         largest_jpg = max(jpg_files, key=lambda f: os.path.getsize(f))
