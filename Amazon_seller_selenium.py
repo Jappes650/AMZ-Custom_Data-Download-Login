@@ -3,7 +3,7 @@ import time
 import pickle
 import json
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import messagebox, filedialog, ttk
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -41,6 +41,267 @@ DOWNLOAD_DIR = os.path.join(BASE_DIR, "amazon_order_downloads")
 # === Verzeichnis erstellen ===
 if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
+
+# === NEUE FUNKTIONEN: Heizungstyp-Erkennung ===
+
+def create_default_config():
+    """Erstellt Standard-Konfigurationsdatei falls sie nicht existiert"""
+    config = {
+        "heating_panels": {
+            "130W Standard": {
+                "width": 500,
+                "height": 380,
+                "tolerance": 0.01,
+                "watt": 130,
+                "description": "Kleine Infrarotheizung"
+            },
+            "300W Standard": {
+                "width": 600,
+                "height": 500,
+                "tolerance": 0.01,
+                "watt": 300,
+                "description": "Mittlere Infrarotheizung"
+            },
+            "450W Standard": {
+                "width": 900,
+                "height": 500,
+                "tolerance": 0.01,
+                "watt": 450,
+                "description": "Mittlere Infrarotheizung"
+            },
+            "600W / 800W Standard": {
+                "width": 1000,
+                "height": 600,
+                "tolerance": 0.01,
+                "watt": "600 - 800",
+                "description": "Große Infrarotheizung"
+            },
+            "1000W / 1200W Standard": {
+                "width": 1200,
+                "height": 600,
+                "tolerance": 0.01,
+                "watt": "1000 - 1200",
+                "description": "Große Infrarotheizung"
+            }
+        },
+        "quality_settings": {
+            "min_dpi": 150,
+            "tiff_compression": "tiff_lzw",
+            "max_ratio_deviation": 0.05
+        }
+    }
+    return config
+
+def load_config():
+    """Lädt Konfiguration aus Datei oder erstellt Standard-Config"""
+    config_path = os.path.join(BASE_DIR, "heating_config.json")
+    
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Fehler beim Laden der Config: {e}")
+            messagebox.showwarning("Config-Fehler", 
+                "Fehler beim Laden der Konfiguration. Verwende Standard-Einstellungen.")
+    
+    # Erstelle Standard-Config
+    config = create_default_config()
+    save_config(config)
+    return config
+
+def save_config(config):
+    """Speichert Konfiguration in Datei"""
+    config_path = os.path.join(BASE_DIR, "heating_config.json")
+    try:
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
+        print(f"Konfiguration gespeichert: {config_path}")
+    except Exception as e:
+        print(f"Fehler beim Speichern der Config: {e}")
+
+def detect_heating_type(dimensions):
+    """
+    Erkennt Heizungstyp anhand der Dimensionen
+    
+    Args:
+        dimensions (dict): Dictionary mit 'width', 'height', 'ratio'
+    
+    Returns:
+        tuple: (heating_type_name, heating_specs) oder ("Unbekannt", None)
+    """
+    try:
+        config = load_config()
+        
+        print(f"=== Heizungstyp-Erkennung ===")
+        print(f"Bild-Verhältnis: {dimensions['ratio']:.4f}")
+        
+        best_match = None
+        best_deviation = float('inf')
+        
+        # Durchsuche alle konfigurierten Heizungstypen
+        for heating_type, specs in config["heating_panels"].items():
+            target_ratio = specs["width"] / specs["height"]
+            deviation = abs(dimensions["ratio"] - target_ratio)
+            
+            print(f"Prüfe {heating_type}:")
+            print(f"  - Ziel-Verhältnis: {target_ratio:.4f}")
+            print(f"  - Abweichung: {deviation:.4f}")
+            print(f"  - Toleranz: {specs['tolerance']:.4f}")
+            
+            # Prüfe ob innerhalb der Toleranz und besser als bisheriger Match
+            if deviation <= specs["tolerance"] and deviation < best_deviation:
+                best_match = (heating_type, specs)
+                best_deviation = deviation
+                print(f"  ✓ Neuer bester Match!")
+            else:
+                print(f"  ✗ Außerhalb Toleranz oder schlechter Match")
+        
+        if best_match:
+            heating_type, specs = best_match
+            print(f"\n🎯 ERKANNT: {heating_type}")
+            print(f"   Größe: {specs['width']}x{specs['height']}mm")
+            print(f"   Leistung: {specs['watt']}W")
+            print(f"   Beschreibung: {specs['description']}")
+            return best_match
+        else:
+            print(f"\n❌ KEIN MATCH: Keine passende Heizung gefunden")
+            return "Unbekannt", None
+            
+    except Exception as e:
+        print(f"Fehler bei Heizungstyp-Erkennung: {e}")
+        return "Fehler", None
+
+def validate_heating_match(heating_type, specs, dimensions, show_dialog=True):
+    """
+    Validiert die Heizungstyp-Erkennung und zeigt Bestätigung
+    
+    Args:
+        heating_type (str): Name des erkannten Heizungstyps
+        specs (dict): Spezifikationen des Heizungstyps
+        dimensions (dict): Bild-Dimensionen
+        show_dialog (bool): Ob Bestätigungsdialog gezeigt werden soll
+    
+    Returns:
+        bool: True wenn Benutzer bestätigt oder kein Dialog
+    """
+    if heating_type == "Unbekannt":
+        if show_dialog:
+            messagebox.showwarning(
+                "Heizungstyp unbekannt",
+                f"Bildverhältnis: {dimensions['ratio']:.4f}\n\n"
+                "Kein passender Heizungstyp gefunden!\n"
+                "Bitte prüfe die Maske bei Amazon oder erweitere die Konfiguration."
+            )
+        return False
+    
+    if heating_type == "Fehler":
+        if show_dialog:
+            messagebox.showerror("Fehler", "Fehler bei der Heizungstyp-Erkennung!")
+        return False
+    
+    # Zeige Bestätigung
+    if show_dialog:
+        target_ratio = specs["width"] / specs["height"]
+        deviation = abs(dimensions["ratio"] - target_ratio)
+        
+        message = f"🎯 ERKANNTER HEIZUNGSTYP:\n\n"
+        message += f"Typ: {heating_type}\n"
+        message += f"Größe: {specs['width']} x {specs['height']} mm\n"
+        message += f"Leistung: {specs['watt']} Watt\n"
+        message += f"Beschreibung: {specs['description']}\n\n"
+        message += f"TECHNISCHE DETAILS:\n"
+        message += f"Bild-Verhältnis: {dimensions['ratio']:.4f}\n"
+        message += f"Ziel-Verhältnis: {target_ratio:.4f}\n"
+        message += f"Abweichung: {deviation:.4f}\n"
+        message += f"Toleranz: {specs['tolerance']:.4f}\n\n"
+        message += "Soll die Verarbeitung fortgesetzt werden?"
+        
+        result = messagebox.askyesno("Heizungstyp bestätigen", message)
+        return result
+    
+    return True
+
+def get_heating_recommendations(dimensions):
+    """
+    Gibt Empfehlungen für ähnliche Heizungstypen wenn kein exakter Match
+    
+    Args:
+        dimensions (dict): Bild-Dimensionen
+    
+    Returns:
+        list: Liste von (heating_type, deviation) Tupeln, sortiert nach Abweichung
+    """
+    try:
+        config = load_config()
+        recommendations = []
+        
+        for heating_type, specs in config["heating_panels"].items():
+            target_ratio = specs["width"] / specs["height"]
+            deviation = abs(dimensions["ratio"] - target_ratio)
+            recommendations.append((heating_type, specs, deviation))
+        
+        # Sortiere nach Abweichung (beste zuerst)
+        recommendations.sort(key=lambda x: x[2])
+        
+        return recommendations[:3]  # Top 3 Empfehlungen
+        
+    except Exception as e:
+        print(f"Fehler bei Empfehlungen: {e}")
+        return []
+
+def edit_heating_config():
+    """Öffnet Fenster zum Bearbeiten der Heizungstypen"""
+    config_window = tk.Toplevel()
+    config_window.title("Heizungstypen konfigurieren")
+    config_window.geometry("600x400")
+    
+    # Zeige aktuelle Konfiguration
+    config = load_config()
+    
+    tk.Label(config_window, 
+             text="AKTUELLE HEIZUNGSTYPEN:", 
+             font=("Arial", 12, "bold")).pack(pady=(20, 10))
+    
+    # Scrollbare Liste der Heizungstypen
+    frame = tk.Frame(config_window)
+    frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+    
+    scrollbar = tk.Scrollbar(frame)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    
+    listbox = tk.Listbox(frame, yscrollcommand=scrollbar.set, font=("Courier", 9))
+    listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    scrollbar.config(command=listbox.yview)
+    
+    # Fülle Liste mit Heizungstypen
+    for heating_type, specs in config["heating_panels"].items():
+        ratio = specs["width"] / specs["height"]
+        text = f"{heating_type:<20} {specs['width']}x{specs['height']}mm {specs['watt']}W (Ratio: {ratio:.3f})"
+        listbox.insert(tk.END, text)
+    
+    # Config-Datei Pfad
+    config_path = os.path.join(BASE_DIR, "heating_config.json")
+    
+    tk.Label(config_window, 
+             text=f"Konfigurationsdatei: {config_path}", 
+             font=("Arial", 8), fg="gray").pack(pady=5)
+    
+    def open_config_folder():
+        try:
+            os.startfile(BASE_DIR)
+        except:
+            messagebox.showinfo("Pfad", f"Öffne diesen Ordner:\n{BASE_DIR}")
+    
+    tk.Button(config_window, 
+              text="Ordner öffnen", 
+              command=open_config_folder,
+              font=("Arial", 10)).pack(pady=10)
+    
+    tk.Label(config_window, 
+             text="Bearbeite die 'heating_config.json' Datei mit einem Texteditor\n"
+                  "und starte das Programm neu um Änderungen zu übernehmen.", 
+             font=("Arial", 9)).pack(pady=10)
 
 # === Selenium Setup ===
 def create_driver():
@@ -430,9 +691,11 @@ def process_downloaded_zip(order_number):
     except Exception as e:
         print(f"Warnung: ZIP-Datei konnte nicht gelöscht werden: {e}")
 
-
+# === ERWEITERTE VERSION mit Heizungstyp-Erkennung ===
 def extract_dimensions_and_check_text(extract_dir):
-    """Sucht nach JSON-Datei, extrahiert Druckdimensionen und prüft Verkäufertext"""
+    """
+    Erweiterte Version mit Heizungstyp-Erkennung
+    """
     try:
         # Suche nach JSON-Dateien
         json_files = [f for f in os.listdir(extract_dir) if f.lower().endswith('.json')]
@@ -476,7 +739,11 @@ def extract_dimensions_and_check_text(extract_dir):
                                     'ratio': dims['width'] / dims['height']
                                 }
                                 print(f"Gefundene Druckdimensionen: {dims['width']}x{dims['height']}")
-                                return required_dimensions
+                                break
+                    if required_dimensions:
+                        break
+                if required_dimensions:
+                    break
         
         # Falls nicht gefunden, in customizationInfo suchen
         if not required_dimensions and 'customizationInfo' in data:
@@ -491,7 +758,9 @@ def extract_dimensions_and_check_text(extract_dir):
                                 'ratio': dims['width'] / dims['height']
                             }
                             print(f"Gefundene Druckdimensionen (ImagePrinting): {dims['width']}x{dims['height']}")
-                            return required_dimensions
+                            break
+                if required_dimensions:
+                    break
         
         if not required_dimensions:
             messagebox.showerror(
@@ -500,6 +769,29 @@ def extract_dimensions_and_check_text(extract_dir):
                 "Die Verarbeitung wird abgebrochen."
             )
             return None
+        
+        # 3. NEU: Heizungstyp-Erkennung
+        heating_type, heating_specs = detect_heating_type(required_dimensions)
+        
+        # 4. NEU: Validierung mit Benutzer-Bestätigung
+        if not validate_heating_match(heating_type, heating_specs, required_dimensions):
+            # Falls Benutzer ablehnt oder kein Match, zeige Empfehlungen
+            if heating_type == "Unbekannt":
+                recommendations = get_heating_recommendations(required_dimensions)
+                if recommendations:
+                    rec_text = "ÄHNLICHE HEIZUNGSTYPEN:\n\n"
+                    for i, (rec_type, rec_specs, deviation) in enumerate(recommendations, 1):
+                        rec_text += f"{i}. {rec_type}\n"
+                        rec_text += f"   Verhältnis: {rec_specs['width']/rec_specs['height']:.4f}\n"
+                        rec_text += f"   Abweichung: {deviation:.4f}\n\n"
+                    
+                    messagebox.showinfo("Empfehlungen", rec_text)
+            
+            return None  # Abbruch der Verarbeitung
+        
+        # 5. Erweitere Dimensions um Heizungsinfo
+        required_dimensions['heating_type'] = heating_type
+        required_dimensions['heating_specs'] = heating_specs
         
         return required_dimensions
         
@@ -561,8 +853,6 @@ def check_and_correct_aspect_ratio(tiff_path, target_ratio, tolerance=0.01):
         print(f"Fehler bei der Bildkorrektur: {e}")
         return False
 
-        
-
 # Aktualisierte process_files_to_tiff Funktion
 def process_files_to_tiff(extract_dir, order_number):
     """Verarbeite SVG und JPG Dateien zu TIFF mit Verhältniskontrolle"""
@@ -585,9 +875,9 @@ def process_files_to_tiff(extract_dir, order_number):
             messagebox.showerror("Fehler", "SVG oder JPG Dateien fehlen")
             return None
         
-        # 2. Extrahiere Dimensionen
+        # 2. Extrahiere Dimensionen und Heizungstyp
         dimensions = extract_dimensions_and_check_text(extract_dir)
-        if not dimensions:  # Wenn keine Dimensionen gefunden wurden
+        if not dimensions:  # Wenn keine Dimensionen gefunden wurden oder Benutzer abgebrochen
             return None  # Verarbeitung abbrechen
         
         # 3. Verarbeite Bild
@@ -601,7 +891,7 @@ def process_files_to_tiff(extract_dir, order_number):
         if not convert_svg_to_tiff(modified_svg, output_path):
             return None
         
-        # 5. Verhältniskontrolle
+        # 5. Verhältniskontrolle (mit Heizungstyp-Info)
         if dimensions and 'ratio' in dimensions:
             print("Führe Verhältniskontrolle durch...")
             if not check_and_correct_aspect_ratio(output_path, dimensions['ratio']):
@@ -871,37 +1161,18 @@ def search_order(order_number):
     finally:
         driver.quit()
 
-# === Cookie-Status prüfen ===
-def check_cookie_status():
-    if not os.path.exists(COOKIE_FILE):
-        messagebox.showinfo("Cookie-Status", "Keine Cookies gespeichert.")
-        return
-    
-    session_info = load_session_info()
-    if session_info:
-        saved_time = datetime.fromisoformat(session_info["timestamp"])
-        time_diff = datetime.now() - saved_time
-        
-        status = f"Cookies gespeichert am: {saved_time.strftime('%d.%m.%Y %H:%M:%S')}\n"
-        status += f"Alter: {time_diff.days} Tage, {time_diff.seconds // 3600} Stunden\n"
-        
-        if time_diff > timedelta(hours=12):
-            status += "Status: Abgelaufen"
-        else:
-            status += "Status: Gültig"
-        
-        messagebox.showinfo("Cookie-Status", status)
-    else:
-        messagebox.showinfo("Cookie-Status", "Cookie-Datei vorhanden, aber keine Session-Info.")
-
 # === GUI ===
 def start_gui():
     window = tk.Tk()
-    window.title("Amazon Seller Central - Bestellungssuche & Verarbeitung")
-    window.geometry("450x300")
+    window.title("Amazon Seller Central - Bestellungssuche & Verarbeitung mit Heizungstyp-Erkennung")
+    window.geometry("500x400")
     
     # Titel
-    tk.Label(window, text="Hinweis: Cookies bleiben gültig bis sie ablaufen", font=("Arial", 9), fg="gray").pack(pady=(20, 5))
+    tk.Label(window, text="INFRAROTHEIZUNG DRUCKDATEI-GENERATOR", 
+             font=("Arial", 14, "bold"), fg="red").pack(pady=(20, 5))
+    
+    tk.Label(window, text="Hinweis: Cookies bleiben gültig bis sie ablaufen", 
+             font=("Arial", 9), fg="gray").pack(pady=(5, 15))
     
     # Bestellnummer eingeben
     tk.Label(window, text="Bestellnummer eingeben:", font=("Arial", 12)).pack(pady=5)
@@ -930,23 +1201,54 @@ def start_gui():
     order_entry.bind('<Return>', on_barcode_input)
     
     # Buttons
-    tk.Button(window, text="Bestellung suchen & verarbeiten", 
+    tk.Button(window, text="🔍 Bestellung suchen & verarbeiten", 
               command=lambda: handle_search(), 
-              font=("Arial", 12), bg="#FF9900", fg="black", width=25).pack(pady=10)
+              font=("Arial", 12), bg="#FF9900", fg="black", width=30).pack(pady=10)
     
-    tk.Button(window, text="Manuell einloggen & Cookies speichern", command=manual_login,
-              font=("Arial", 10), width=35).pack(pady=5)
+    # Separator
+    separator = tk.Frame(window, height=2, bd=1, relief=tk.SUNKEN)
+    separator.pack(fill=tk.X, padx=20, pady=10)
     
-    tk.Button(window, text="Cookie-Status prüfen", command=check_cookie_status,
-              font=("Arial", 10), width=35).pack(pady=5)
+    # Management Buttons
+    tk.Label(window, text="VERWALTUNG:", font=("Arial", 10, "bold")).pack(pady=(5, 5))
+    
+    tk.Button(window, text="🔐 Manuell einloggen & Cookies speichern", 
+              command=manual_login,
+              font=("Arial", 10), width=40).pack(pady=2)
+    
+    tk.Button(window, text="📊 Cookie-Status prüfen", 
+              command=check_cookie_status,
+              font=("Arial", 10), width=40).pack(pady=2)
+    
+    tk.Button(window, text="⚙️ Heizungstypen konfigurieren", 
+              command=edit_heating_config,
+              font=("Arial", 10), width=40).pack(pady=2)
+
+    # Info-Bereich
+    info_frame = tk.Frame(window, bg="#f0f0f0", relief=tk.RIDGE, bd=1)
+    info_frame.pack(fill=tk.X, padx=20, pady=15)
+    
+    tk.Label(info_frame, text="ℹ️ NEUE FEATURES:", 
+             font=("Arial", 9, "bold"), bg="#f0f0f0").pack(pady=(5, 2))
+    
+    tk.Label(info_frame, text="• Automatische Heizungstyp-Erkennung", 
+             font=("Arial", 8), bg="#f0f0f0").pack(anchor="w", padx=10)
+    
+    tk.Label(info_frame, text="• Bildverhältnis-Kontrolle", 
+             font=("Arial", 8), bg="#f0f0f0").pack(anchor="w", padx=10)
+    
+    tk.Label(info_frame, text="• Konfigurierbare Heizungsgrößen", 
+             font=("Arial", 8), bg="#f0f0f0").pack(anchor="w", padx=10, pady=(0, 5))
 
     # Hinweis
-    tk.Label(window, text="Hinweis: Cookies sind ca. 12 Stunden gültig", 
-             font=("Arial", 9), fg="gray").pack(pady=(20, 5))
+    tk.Label(window, text="Hinweis: Cookies sind ca. 12 Stunden gültig | Barcode-Scanner unterstützt", 
+             font=("Arial", 8), fg="gray").pack(pady=(10, 5))
     
     # Automatisch nach Barcode-Eingabe suchen
     window.mainloop()
 
 # === Programmstart ===
 if __name__ == "__main__":
+    # Erstelle Standard-Config beim ersten Start
+    load_config()
     start_gui()
