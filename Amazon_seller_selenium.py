@@ -120,6 +120,41 @@ def save_config(config):
     except Exception as e:
         print(f"Fehler beim Speichern der Config: {e}")
 
+def ask_yes_no_safe(title, message):
+    """Robuste Messagebox mit expliziter Bereinigung"""
+    try:
+        # Erstelle temporäres Root-Fenster
+        temp_root = tk.Tk()
+        temp_root.withdraw()  # Sofort verstecken
+        
+        # Setze Fenster-Eigenschaften für bessere Kontrolle
+        temp_root.overrideredirect(True)  # Kein Fenster-Dekor
+        temp_root.geometry("1x1+0+0")     # Minimal und außer Sicht
+        temp_root.attributes('-alpha', 0.0)  # Vollständig transparent
+        
+        # Kurz anzeigen und wieder verstecken für Initialisierung
+        temp_root.deiconify()
+        temp_root.update()
+        temp_root.withdraw()
+        
+        # Messagebox mit explizitem Parent
+        result = messagebox.askyesno(title, message, parent=temp_root)
+        
+        # Sofortiges Cleanup
+        temp_root.quit()
+        temp_root.destroy()
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        
+        return result
+        
+    except Exception as e:
+        print(f"Messagebox Fehler: {e}")
+        return False
+
+
 def detect_heating_type(dimensions):
     """
     Erkennt Heizungstyp anhand der Dimensionen
@@ -217,7 +252,7 @@ def validate_heating_match(heating_type, specs, dimensions, show_dialog=True):
         message += f"Toleranz: {specs['tolerance']:.4f}\n\n"
         message += "Soll die Verarbeitung fortgesetzt werden?"
         
-        result = messagebox.askyesno("Heizungstyp bestätigen", message)
+        result = ask_yes_no_safe("Heizungstyp bestätigen", message)
         return result
     
     return True
@@ -623,26 +658,420 @@ def wait_for_download_completion(download_dir, timeout=30):
     
     return False
 
-# === Verbesserte Funktion zur Verarbeitung der ZIP-Datei ===
+# === Multi-Position Verarbeitung ===
+
+def find_order_positions(driver):
+    """
+    Erkennt alle Positionen einer Bestellung und prüft welche Anpassungsinformationen haben.
+    Optimiert: weniger sleep-Zeiten, robustes Verhalten bleibt.
+    
+    Returns:
+        list: [{'position': 1, 'has_customization': True, 'element': WebElement, 'expander': WebElement}, ...]
+    """
+    try:
+        print("=== Optimierte Suche nach Bestellpositionen (stabil & schnell) ===")
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "span.a-expander-prompt, .a-expander-prompt, [class*='expander-prompt']"))
+        )
+
+        positions = []
+
+        # Suche nach Expandern
+        expander_selectors = [
+            "span.a-expander-prompt",
+            ".a-expander-prompt",
+            "[class*='expander-prompt']"
+        ]
+        
+        expanders = []
+        for selector in expander_selectors:
+            found = driver.find_elements(By.CSS_SELECTOR, selector)
+            if found:
+                expanders = found
+                print(f"Expanders gefunden mit Selektor: {selector}")
+                break
+        
+        if not expanders:
+            print("Keine Expander gefunden – möglicherweise nur eine Position.")
+            # Einzelposition prüfen
+            customization_links = driver.find_elements(By.CSS_SELECTOR, "a.a-link-normal[href*='fulfillment']")
+            if customization_links:
+                positions.append({
+                    'position': 1,
+                    'has_customization': True,
+                    'element': customization_links[0],
+                    'expander': None
+                })
+                print("Einzelne Position mit Anpassungsinformationen gefunden.")
+            else:
+                print("Keine Anpassungsinformationen gefunden.")
+            return positions
+
+        print(f"Gefundene Expander: {len(expanders)}")
+
+        for i, expander in enumerate(expanders, 1):
+            try:
+                print(f"\n--- Prüfe Position {i} ---")
+                driver.execute_script("arguments[0].scrollIntoView(true);", expander)
+                WebDriverWait(driver, 5).until(EC.element_to_be_clickable(expander)).click()
+                
+                # Suche nach Link innerhalb übergeordnetem Container
+                parent = expander
+                for _ in range(5):
+                    parent = parent.find_element(By.XPATH, "./..")
+                    customization_links = parent.find_elements(By.CSS_SELECTOR, "a.a-link-normal[href*='fulfillment']")
+                    if customization_links:
+                        positions.append({
+                            'position': i,
+                            'has_customization': True,
+                            'element': customization_links[0],
+                            'expander': expander
+                        })
+                        print(f"✅ Position {i}: Hat Anpassungsinformationen")
+                        break
+                else:
+                    positions.append({
+                        'position': i,
+                        'has_customization': False,
+                        'element': None,
+                        'expander': expander
+                    })
+                    print(f"⚪ Position {i}: Keine Anpassungsinformationen")
+
+                # Expander wieder schließen (optional, aber kann DOM sauber halten)
+                try:
+                    WebDriverWait(driver, 5).until(EC.element_to_be_clickable(expander)).click()
+                except:
+                    pass
+
+            except Exception as e:
+                print(f"⚠️ Fehler bei Position {i}: {e}")
+                positions.append({
+                    'position': i,
+                    'has_customization': False,
+                    'element': None,
+                    'expander': expander
+                })
+
+        print(f"\n=== ZUSAMMENFASSUNG ===")
+        print(f"Gesamtpositionen: {len(positions)}")
+        print(f"Mit Anpassungsinformationen: {len([p for p in positions if p['has_customization']])}")
+
+        return positions
+
+    except Exception as e:
+        print(f"❌ Fehler bei der Positionssuche: {e}")
+        return []
+
+def process_single_position(driver, position_info, order_number):
+    """
+    Verarbeitet eine einzelne Position
+    
+    Args:
+        driver: WebDriver-Instanz
+        position_info: Dictionary mit Position-Informationen
+        order_number: Bestellnummer
+    
+    Returns:
+        bool: True wenn erfolgreich verarbeitet
+    """
+    try:
+        position_num = position_info['position']
+        print(f"\n=== Verarbeite Position {position_num} ===")
+        
+        if not position_info['has_customization']:
+            print(f"Position {position_num}: Keine Anpassungsinformationen - übersprungen")
+            return True
+        
+        # Öffne die Position falls sie geschlossen ist
+        if position_info['expander']:
+            try:
+                driver.execute_script("arguments[0].scrollIntoView(true);", position_info['expander'])
+                time.sleep(1)
+                position_info['expander'].click()
+                time.sleep(2)
+            except:
+                print("Position bereits geöffnet oder Fehler beim Öffnen")
+        
+        # Klicke auf Anpassungsinformationen-Link
+        customization_link = position_info['element']
+        driver.execute_script("arguments[0].scrollIntoView(true);", customization_link)
+        time.sleep(1)
+        customization_link.click()
+        print(f"Anpassungsinformationen für Position {position_num} geöffnet")
+        time.sleep(3)
+        
+        # Warte und klicke Download-Button
+        download_button = WebDriverWait(driver, 30).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "kat-button.download-zip-file-button"))
+        )
+        download_button.click()
+        print(f"Download für Position {position_num} gestartet")
+        
+        # Verarbeite die ZIP-Datei
+        position_order_number = f"{order_number}_pos{position_num}"
+        success = process_downloaded_zip(position_order_number)
+        
+        if success:
+            print(f"✅ Position {position_num} erfolgreich verarbeitet")
+        else:
+            print(f"❌ Position {position_num} Verarbeitung fehlgeschlagen")
+        
+        # NEU: Direkt zur Bestellübersicht zurück über Breadcrumb
+        try:
+            breadcrumb = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "kat-breadcrumb-item[label='Bestelldetails']"))
+            )
+            breadcrumb.click()
+            print("Zurück zur Bestellübersicht über Breadcrumb")
+            time.sleep(3)
+            
+            # Warte bis die Bestellübersicht wieder geladen ist
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "span.a-expander-prompt"))
+            )
+            
+        except Exception as e:
+            print(f"Warnung: Konnte nicht über Breadcrumb zurück: {e}")
+            # Fallback: Browser zurück
+            driver.back()
+            time.sleep(3)
+        
+        return success
+        
+    except Exception as e:
+        print(f"Fehler bei Position {position_num}: {e}")
+        # Versuche zurück zur Bestellübersicht zu gehen
+        try:
+            driver.back()
+            time.sleep(2)
+        except:
+            pass
+        return False
+
+def search_order_multi_position(order_number):
+    """
+    Erweiterte Bestellungssuche mit Multi-Position-Unterstützung
+    """
+    driver = create_driver()
+    
+    try:
+        print(f"=== Starte Multi-Position-Suche für Bestellung: {order_number} ===")
+        
+        # Standard Login-Prozess
+        if not load_cookies(driver):
+            messagebox.showerror("Fehler", "Keine gültigen Cookies gefunden. Bitte logge dich zuerst manuell ein.")
+            return
+
+        driver.refresh()
+        time.sleep(3)
+        
+        current_url = driver.current_url
+        print(f"URL nach Cookie-Login: {current_url}")
+        
+        if any(keyword in current_url.lower() for keyword in ["signin", "login", "auth"]):
+            messagebox.showerror("Session abgelaufen", "Deine Session ist abgelaufen. Bitte logge dich erneut ein.")
+            return
+
+        # Account-Auswahl handling (Deutschland)
+        try:
+            print("Prüfe auf Account-Auswahlfenster...")
+            germany_selectors = [
+                'button.full-page-account-switcher-account-details span.full-page-account-switcher-account-label',
+                'button.full-page-account-switcher-account-details',
+                '[data-testid="account-switcher-account-details"]',
+                'button[class*="account-switcher"]'
+            ]
+            
+            germany_button = None
+            for selector in germany_selectors:
+                try:
+                    elements = WebDriverWait(driver, 5).until(
+                        EC.presence_of_all_elements_located((By.CSS_SELECTOR, selector))
+                    )
+                    
+                    for element in elements:
+                        if "Deutschland" in element.text or "Germany" in element.text:
+                            germany_button = element
+                            break
+                    
+                    if germany_button:
+                        break
+                        
+                except:
+                    continue
+            
+            if germany_button:
+                print("Deutschland Account gefunden")
+                germany_button.click()
+                time.sleep(2)
+                
+                # Bestätigungsbutton
+                confirm_selectors = [
+                    'kat-button[data-test="confirm-selection"]',
+                    'kat-button.full-page-account-switcher-button',
+                    'button.kat-button.full-page-account-switcher-button',
+                    'button[class*="full-page-account-switcher-button"]',
+                    'button[class*="account-switcher-button"]',
+                    'button.kat-button'
+                ]
+
+                for selector in confirm_selectors:
+                    try:
+                        confirm_button = WebDriverWait(driver, 5).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                        )
+                        if confirm_button:
+                            driver.execute_script("arguments[0].click();", confirm_button)
+                            time.sleep(2)
+                            break
+                    except:
+                        continue
+
+        except Exception as e:
+            print(f"Account-Auswahl übersprungen: {str(e)}")
+        
+        # Suche nach der Bestellung
+        search_field = WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "input#sc-search-field"))
+        )
+        print("Suchfeld gefunden")
+        
+        search_field.clear()
+        search_field.send_keys(order_number)
+        
+        search_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "button.sc-search-button.search-icon-container"))
+        )
+        search_button.click()
+        print("Suche durchgeführt")
+        
+        # Prüfe auf "Nicht gefunden"
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.sc-no-results-message, span.a-expander-prompt"))
+            )
+            
+            no_results = driver.find_elements(By.CSS_SELECTOR, "div.sc-no-results-message")
+            if no_results:
+                messagebox.showwarning("Nicht gefunden", f"Bestellung {order_number} wurde nicht gefunden.")
+                return
+            
+            # Erkenne alle Positionen
+            positions = find_order_positions(driver)
+            
+            if not positions:
+                messagebox.showwarning("Keine Positionen", "Keine Bestellpositionen gefunden.")
+                return
+            
+            # Zeige Übersicht der gefundenen Positionen
+            customizable_positions = [p for p in positions if p['has_customization']]
+            
+            if not customizable_positions:
+                messagebox.showinfo("Keine Anpassungen", 
+                    f"Bestellung {order_number} hat {len(positions)} Position(en), "
+                    "aber keine davon hat Anpassungsinformationen.")
+                return
+            
+            # Bestätigung anzeigen
+            message = f"BESTELLUNG: {order_number}\n\n"
+            message += f"Gefundene Positionen: {len(positions)}\n"
+            message += f"Mit Anpassungsinformationen: {len(customizable_positions)}\n\n"
+            message += "Positionen mit Anpassungen:\n"
+            for pos in customizable_positions:
+                message += f"• Position {pos['position']}\n"
+            message += "\nSollen alle Positionen verarbeitet werden?"
+            
+            result = ask_yes_no_safe("Multi-Position Verarbeitung", message)
+            if not result:
+                print("Verarbeitung vom Benutzer abgebrochen")
+                return
+            
+            # Verarbeite alle Positionen mit Anpassungsinformationen
+            processed_count = 0
+            failed_count = 0
+            
+            for position_info in customizable_positions:
+                try:
+                    print(f"\n{'='*50}")
+                    print(f"VERARBEITE POSITION {position_info['position']} VON {len(customizable_positions)}")
+                    print(f"{'='*50}")
+                    
+                    # NEU: Nach jeder Navigation die Positionen neu laden
+                    current_positions = find_order_positions(driver)
+                    current_position_info = next(
+                        (p for p in current_positions if p['position'] == position_info['position']), 
+                        None
+                    )
+                    
+                    if not current_position_info:
+                        print(f"Position {position_info['position']} nicht mehr gefunden")
+                        failed_count += 1
+                        continue
+                    
+                    success = process_single_position(driver, current_position_info, order_number)
+                    
+                    if success:
+                        processed_count += 1
+                    else:
+                        failed_count += 1
+                    
+                    # Kurze Pause zwischen Positionen
+                    time.sleep(2)
+                    
+                except Exception as e:
+                    print(f"Fehler bei Position {position_info['position']}: {e}")
+                    failed_count += 1
+                    continue
+            
+            # Abschlussmeldung
+            final_message = f"VERARBEITUNG ABGESCHLOSSEN!\n\n"
+            final_message += f"Bestellung: {order_number}\n"
+            final_message += f"Erfolgreich verarbeitet: {processed_count}\n"
+            final_message += f"Fehlgeschlagen: {failed_count}\n"
+            final_message += f"Gesamtpositionen: {len(positions)}\n\n"
+            final_message += "Die TIFF-Dateien befinden sich im 'amazon_order_downloads' Ordner."
+            
+            messagebox.showinfo("Verarbeitung abgeschlossen", final_message)
+            
+            # Öffne den Download-Ordner
+            try:
+                os.startfile(DOWNLOAD_DIR)
+            except:
+                pass
+                
+        except Exception as e:
+            messagebox.showwarning("Nicht gefunden", 
+                f"Bestellung {order_number} wurde nicht gefunden oder die Seite hat zu lange geladen.")
+            
+    except Exception as e:
+        messagebox.showerror("Fehler", f"Multi-Position-Prozess fehlgeschlagen: {e}")
+        print(f"Kritischer Fehler: {str(e)}")
+        
+    finally:
+        # Browser erst am Ende schließen
+        driver.quit()
+
+# Aktualisierte process_downloaded_zip für Multi-Position
 def process_downloaded_zip(order_number):
-    """Verarbeite die heruntergeladene ZIP-Datei"""
-    print(f"=== Starte Verarbeitung für Bestellung: {order_number} ===")
+    """Verarbeite die heruntergeladene ZIP-Datei - Multi-Position Version"""
+    print(f"=== Starte Verarbeitung für: {order_number} ===")
     
     # Warte auf Download-Vollendung
     if not wait_for_download_completion(DOWNLOAD_DIR, timeout=30):
-        messagebox.showerror("Fehler", "Download wurde nicht rechtzeitig abgeschlossen.")
-        return
+        print("❌ Download nicht rechtzeitig abgeschlossen")
+        return False
     
     # Finde die neueste ZIP-Datei
     zip_files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.zip')]
     if not zip_files:
-        messagebox.showerror("Fehler", f"Keine ZIP-Datei gefunden in: {DOWNLOAD_DIR}")
-        return
+        print(f"❌ Keine ZIP-Datei gefunden in: {DOWNLOAD_DIR}")
+        return False
     
     latest_zip = max(zip_files, key=lambda f: os.path.getmtime(os.path.join(DOWNLOAD_DIR, f)))
     zip_path = os.path.join(DOWNLOAD_DIR, latest_zip)
     
-    print(f"Gefundene ZIP-Datei: {zip_path}")
+    print(f"Verarbeite ZIP-Datei: {zip_path}")
     
     # Erstelle Ordner für entpackte Dateien
     extract_dir = os.path.join(DOWNLOAD_DIR, order_number)
@@ -657,7 +1086,7 @@ def process_downloaded_zip(order_number):
             zip_ref.extractall(extract_dir)
         print(f"Dateien entpackt nach: {extract_dir}")
         
-        # Liste alle entpackten Dateien
+        # Liste entpackte Dateien
         print("Entpackte Dateien:")
         for root, dirs, files in os.walk(extract_dir):
             for file in files:
@@ -665,31 +1094,143 @@ def process_downloaded_zip(order_number):
                 print(f"  - {file_path}")
         
     except Exception as e:
-        messagebox.showerror("Fehler", f"Fehler beim Entpacken der ZIP-Datei: {e}")
-        return
+        print(f"❌ Fehler beim Entpacken: {e}")
+        return False
     
     # Verarbeite die Dateien zu TIFF
     tiff_path = process_files_to_tiff(extract_dir, order_number)
     
     if tiff_path and os.path.exists(tiff_path):
-        messagebox.showinfo("Erfolg", 
-            f"TIFF-Datei erfolgreich erstellt:\n{tiff_path}\n\n"
-            "Die Datei befindet sich im 'amazon_order_downloads' Ordner.")
+        print(f"✅ TIFF-Datei erfolgreich erstellt: {tiff_path}")
         
-        # Öffne den Ordner mit der TIFF-Datei
+        # Lösche die ZIP-Datei nach erfolgreicher Verarbeitung
         try:
-            os.startfile(os.path.dirname(tiff_path))
-        except:
-            pass  # Falls startfile nicht verfügbar ist
+            os.remove(zip_path)
+            print(f"ZIP-Datei gelöscht: {zip_path}")
+        except Exception as e:
+            print(f"Warnung: ZIP-Datei konnte nicht gelöscht werden: {e}")
+        
+        return True
     else:
-        messagebox.showerror("Fehler", "TIFF-Datei konnte nicht erstellt werden.")
+        print("❌ TIFF-Datei konnte nicht erstellt werden")
+        return False
+
+
+def extract_image_filename_from_json(extract_dir):
+    """
+    Extrahiert den korrekten Bildnamen aus der JSON-Datei
     
-    # Lösche die ZIP-Datei nach erfolgreicher Verarbeitung
+    Returns:
+        str: Der korrekte Bildname oder None wenn nicht gefunden
+    """
     try:
-        os.remove(zip_path)
-        print(f"ZIP-Datei gelöscht: {zip_path}")
+        # Suche nach JSON-Dateien
+        json_files = [f for f in os.listdir(extract_dir) if f.lower().endswith('.json')]
+        if not json_files:
+            print("Keine JSON-Datei gefunden")
+            return None
+        
+        json_path = os.path.join(extract_dir, json_files[0])
+        print(f"Durchsuche JSON-Datei nach Bildname: {json_path}")
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Durchsuche customizationData nach ImageCustomization
+        if 'customizationData' in data:
+            print("Durchsuche customizationData...")
+            image_name = search_for_image_in_data(data['customizationData'])
+            if image_name:
+                print(f"✅ Bildname in customizationData gefunden: {image_name}")
+                return image_name
+        
+        # Fallback: Durchsuche customizationInfo
+        if 'customizationInfo' in data:
+            print("Durchsuche customizationInfo als Fallback...")
+            # Hier könnten weitere Suchlogiken implementiert werden
+            # Da in deinem Beispiel der Bildname nicht in customizationInfo steht
+        
+        print("❌ Kein Bildname in JSON gefunden")
+        return None
+        
     except Exception as e:
-        print(f"Warnung: ZIP-Datei konnte nicht gelöscht werden: {e}")
+        print(f"Fehler beim Extrahieren des Bildnamens aus JSON: {e}")
+        return None
+
+def search_for_image_in_data(data):
+    """
+    Rekursive Suche nach ImageCustomization in den Datenstrukturen
+    
+    Args:
+        data: Dictionary oder Liste zum Durchsuchen
+    
+    Returns:
+        str: Bildname oder None
+    """
+    if isinstance(data, dict):
+        # Prüfe ob dies eine ImageCustomization ist
+        if data.get('type') == 'ImageCustomization' and 'image' in data:
+            image_info = data['image']
+            if 'imageName' in image_info:
+                return image_info['imageName']
+        
+        # Durchsuche alle Werte im Dictionary
+        for key, value in data.items():
+            result = search_for_image_in_data(value)
+            if result:
+                return result
+                
+    elif isinstance(data, list):
+        # Durchsuche alle Elemente in der Liste
+        for item in data:
+            result = search_for_image_in_data(item)
+            if result:
+                return result
+    
+    return None
+
+def find_correct_image_file(extract_dir, target_filename):
+    """
+    Findet die korrekte Bilddatei basierend auf dem Ziel-Dateinamen
+    
+    Args:
+        extract_dir (str): Verzeichnis mit den extrahierten Dateien
+        target_filename (str): Ziel-Dateiname aus der JSON
+    
+    Returns:
+        str: Vollständiger Pfad zur korrekten Bilddatei oder None
+    """
+    try:
+        # Erstelle eine Liste aller Bilddateien
+        image_files = []
+        for root, dirs, files in os.walk(extract_dir):
+            for file in files:
+                if file.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp')):
+                    image_files.append(os.path.join(root, file))
+        
+        print(f"Gefundene Bilddateien: {[os.path.basename(f) for f in image_files]}")
+        print(f"Suche nach: {target_filename}")
+        
+        # Exakte Übereinstimmung
+        for image_file in image_files:
+            if os.path.basename(image_file) == target_filename:
+                print(f"✅ Exakte Übereinstimmung gefunden: {image_file}")
+                return image_file
+        
+        # Suche ohne Dateiendung (falls sich die Endung geändert hat)
+        target_base = os.path.splitext(target_filename)[0]
+        for image_file in image_files:
+            file_base = os.path.splitext(os.path.basename(image_file))[0]
+            if file_base == target_base:
+                print(f"✅ Übereinstimmung ohne Dateiendung gefunden: {image_file}")
+                return image_file
+        
+        print(f"❌ Keine Übereinstimmung für {target_filename} gefunden")
+        return None
+        
+    except Exception as e:
+        print(f"Fehler beim Suchen der korrekten Bilddatei: {e}")
+        return None  
 
 # === ERWEITERTE VERSION mit Heizungstyp-Erkennung ===
 def extract_dimensions_and_check_text(extract_dir):
@@ -855,43 +1396,66 @@ def check_and_correct_aspect_ratio(tiff_path, target_ratio, tolerance=0.01):
 
 # Aktualisierte process_files_to_tiff Funktion
 def process_files_to_tiff(extract_dir, order_number):
-    """Verarbeite SVG und JPG Dateien zu TIFF mit Verhältniskontrolle"""
+    """Verarbeite SVG und Bilddateien zu TIFF mit korrekter Bilderkennung"""
     try:
         print(f"=== Starte Dateiverarbeitung für {order_number} ===")
         
-        # 1. Finde Dateien
+        # 1. Finde SVG-Datei
         svg_file = None
-        jpg_files = []
-        
         for root, dirs, files in os.walk(extract_dir):
             for file in files:
-                file_path = os.path.join(root, file)
                 if file.lower().endswith('.svg'):
-                    svg_file = file_path
-                elif file.lower().endswith(('.jpg', '.jpeg')):
-                    jpg_files.append(file_path)
+                    svg_file = os.path.join(root, file)
+                    break
+            if svg_file:
+                break
         
-        if not svg_file or not jpg_files:
-            messagebox.showerror("Fehler", "SVG oder JPG Dateien fehlen")
+        if not svg_file:
+            messagebox.showerror("Fehler", "Keine SVG-Datei gefunden")
             return None
         
-        # 2. Extrahiere Dimensionen und Heizungstyp
+        # 2. NEUE LOGIK: Extrahiere korrekten Bildnamen aus JSON
+        target_image_name = extract_image_filename_from_json(extract_dir)
+        target_image_file = None
+        
+        if target_image_name:
+            # Suche die korrekte Bilddatei
+            target_image_file = find_correct_image_file(extract_dir, target_image_name)
+            
+        if not target_image_file:
+            print("⚠️ Fallback: Verwende größte Bilddatei")
+            # Fallback zur alten Methode: größte Bilddatei
+            image_files = []
+            for root, dirs, files in os.walk(extract_dir):
+                for file in files:
+                    if file.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp')):
+                        image_files.append(os.path.join(root, file))
+            
+            if not image_files:
+                messagebox.showerror("Fehler", "Keine Bilddateien gefunden")
+                return None
+            
+            target_image_file = max(image_files, key=lambda f: os.path.getsize(f))
+            print(f"Fallback: Verwende größte Datei: {os.path.basename(target_image_file)}")
+        
+        print(f"🎯 Verwende Bilddatei: {os.path.basename(target_image_file)}")
+        
+        # 3. Extrahiere Dimensionen und Heizungstyp
         dimensions = extract_dimensions_and_check_text(extract_dir)
         if not dimensions:  # Wenn keine Dimensionen gefunden wurden oder Benutzer abgebrochen
             return None  # Verarbeitung abbrechen
         
-        # 3. Verarbeite Bild
-        largest_jpg = max(jpg_files, key=lambda f: os.path.getsize(f))
-        modified_svg = embed_image_in_svg(largest_jpg, svg_file)
+        # 4. Verarbeite Bild
+        modified_svg = embed_image_in_svg(target_image_file, svg_file)
         if not modified_svg:
             return None
         
-        # 4. Konvertiere zu TIFF
+        # 5. Konvertiere zu TIFF
         output_path = os.path.join(extract_dir, f"{order_number}.tiff")
         if not convert_svg_to_tiff(modified_svg, output_path):
             return None
         
-        # 5. Verhältniskontrolle (mit Heizungstyp-Info)
+        # 6. Verhältniskontrolle (mit Heizungstyp-Info)
         if dimensions and 'ratio' in dimensions:
             print("Führe Verhältniskontrolle durch...")
             if not check_and_correct_aspect_ratio(output_path, dimensions['ratio']):
@@ -1186,7 +1750,7 @@ def start_gui():
         if order_number is None:
             order_number = order_entry.get().strip()
         if order_number:
-            search_order(order_number)
+            search_order_multi_position(order_number)
         else:
             messagebox.showwarning("Hinweis", "Bitte eine Bestellnummer eingeben.")
 
