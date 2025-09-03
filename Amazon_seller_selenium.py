@@ -19,6 +19,7 @@ import base64
 from lxml import etree
 import shutil
 import sys
+import threading
 
 # === Globale Variablen ===
 
@@ -1750,7 +1751,7 @@ def start_gui():
         if order_number is None:
             order_number = order_entry.get().strip()
         if order_number:
-            search_order_multi_position(order_number)
+            threading.Thread(target=search_order_multi_position, args=(order_number,), daemon=True).start()
         else:
             messagebox.showwarning("Hinweis", "Bitte eine Bestellnummer eingeben.")
 
