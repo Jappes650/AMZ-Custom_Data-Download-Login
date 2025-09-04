@@ -21,6 +21,15 @@ import shutil
 import sys
 import threading
 
+# Thread-sichere Messagebox Wrapper
+def safe_messagebox(func, *args, **kwargs):
+    import tkinter as tk
+    root = tk._default_root
+    if root:
+        root.after(0, lambda: func(*args, **kwargs))
+    else:
+        func(*args, **kwargs)
+
 # === Globale Variablen ===
 
 if getattr(sys, 'frozen', False):
@@ -103,7 +112,7 @@ def load_config():
                 return json.load(f)
         except Exception as e:
             print(f"Fehler beim Laden der Config: {e}")
-            messagebox.showwarning("Config-Fehler", 
+            safe_messagebox(messagebox.showwarning, "Config-Fehler", 
                 "Fehler beim Laden der Konfiguration. Verwende Standard-Einstellungen.")
     
     # Erstelle Standard-Config
@@ -122,38 +131,25 @@ def save_config(config):
         print(f"Fehler beim Speichern der Config: {e}")
 
 def ask_yes_no_safe(title, message):
-    """Robuste Messagebox mit expliziter Bereinigung"""
-    try:
-        # Erstelle temporäres Root-Fenster
-        temp_root = tk.Tk()
-        temp_root.withdraw()  # Sofort verstecken
-        
-        # Setze Fenster-Eigenschaften für bessere Kontrolle
-        temp_root.overrideredirect(True)  # Kein Fenster-Dekor
-        temp_root.geometry("1x1+0+0")     # Minimal und außer Sicht
-        temp_root.attributes('-alpha', 0.0)  # Vollständig transparent
-        
-        # Kurz anzeigen und wieder verstecken für Initialisierung
-        temp_root.deiconify()
-        temp_root.update()
-        temp_root.withdraw()
-        
-        # Messagebox mit explizitem Parent
-        result = messagebox.askyesno(title, message, parent=temp_root)
-        
-        # Sofortiges Cleanup
-        temp_root.quit()
-        temp_root.destroy()
-        
-        # Force garbage collection
-        import gc
-        gc.collect()
-        
-        return result
-        
-    except Exception as e:
-        print(f"Messagebox Fehler: {e}")
-        return False
+    """Thread-sicheres askyesno mit Rückgabe"""
+    result = {"value": False}
+    done = tk.BooleanVar()  # Synchronisations-Flag
+
+    def _ask():
+        try:
+            res = messagebox.askyesno(title, message)
+            result["value"] = res
+        finally:
+            done.set(True)  # Signal: Dialog geschlossen
+
+    root = tk._default_root
+    if root:
+        root.after(0, _ask)
+        root.wait_variable(done)  # Warten, bis _ask fertig ist
+    else:
+        result["value"] = messagebox.askyesno(title, message)
+
+    return result["value"]
 
 
 def detect_heating_type(dimensions):
@@ -223,7 +219,7 @@ def validate_heating_match(heating_type, specs, dimensions, show_dialog=True):
     """
     if heating_type == "Unbekannt":
         if show_dialog:
-            messagebox.showwarning(
+            safe_messagebox(messagebox.showwarning, 
                 "Heizungstyp unbekannt",
                 f"Bildverhältnis: {dimensions['ratio']:.4f}\n\n"
                 "Kein passender Heizungstyp gefunden!\n"
@@ -233,7 +229,7 @@ def validate_heating_match(heating_type, specs, dimensions, show_dialog=True):
     
     if heating_type == "Fehler":
         if show_dialog:
-            messagebox.showerror("Fehler", "Fehler bei der Heizungstyp-Erkennung!")
+            safe_messagebox(messagebox.showerror, "Fehler", "Fehler bei der Heizungstyp-Erkennung!")
         return False
     
     # Zeige Bestätigung
@@ -327,7 +323,7 @@ def edit_heating_config():
         try:
             os.startfile(BASE_DIR)
         except:
-            messagebox.showinfo("Pfad", f"Öffne diesen Ordner:\n{BASE_DIR}")
+            ("Pfad", f"Öffne diesen Ordner:\n{BASE_DIR}")
     
     tk.Button(config_window, 
               text="Ordner öffnen", 
@@ -507,7 +503,7 @@ def manual_login():
         print("Zur Login-Seite navigiert")
         
         # Zeige Login-Anweisungen
-        messagebox.showinfo(
+        safe_messagebox(messagebox.showinfo, 
             "Manueller Login erforderlich", 
             "Bitte führe den Login jetzt durch:\n\n"
             "1. Gib deine Amazon-Anmeldedaten ein\n"
@@ -571,20 +567,20 @@ def manual_login():
         
         if not login_confirmed:
             print("Login abgebrochen durch Benutzer")
-            messagebox.showinfo("Abgebrochen", "Login-Prozess wurde abgebrochen.")
+            safe_messagebox(messagebox.showinfo, "Abgebrochen", "Login-Prozess wurde abgebrochen.")
             return
         
         print("Login-Bestätigung erhalten, speichere Cookies...")
         
         # Speichere Cookies direkt nach Bestätigung
         if save_cookies(driver):
-            messagebox.showinfo("Erfolg!", 
+            safe_messagebox(messagebox.showinfo, "Erfolg!", 
             "Login erfolgreich abgeschlossen!\n\n"
             "Cookies wurden gespeichert und bleiben gültig, bis sie vom Server abgelehnt werden.\n"
             "Du kannst jetzt Bestellungen suchen.")
             print("Cookie-Speicherung erfolgreich")
         else:
-            messagebox.showwarning("Teilweise erfolgreich", 
+            safe_messagebox(messagebox.showwarning, "Teilweise erfolgreich", 
                 "Login war erfolgreich, aber Cookies konnten nicht gespeichert werden.\n"
                 "Du musst dich beim nächsten Mal erneut einloggen.")
             print("Cookie-Speicherung fehlgeschlagen")
@@ -592,7 +588,7 @@ def manual_login():
     except Exception as e:
         error_msg = f"Kritischer Fehler beim Login: {str(e)}"
         print(error_msg)
-        messagebox.showerror("Fehler", error_msg)
+        safe_messagebox(messagebox.showerror, "Fehler", error_msg)
         
     finally:
         # Browser nur schließen wenn der Benutzer es bestätigt hat
@@ -607,7 +603,7 @@ def manual_login():
 # === Cookie-Status prüfen ===
 def check_cookie_status():
     if not os.path.exists(COOKIE_FILE):
-        messagebox.showinfo("Cookie-Status", "❌ Keine Cookies gespeichert.\n\nBitte logge dich zuerst manuell ein.")
+        safe_messagebox(messagebox.showinfo, "Cookie-Status", "❌ Keine Cookies gespeichert.\n\nBitte logge dich zuerst manuell ein.")
         return
     
     try:
@@ -629,15 +625,15 @@ def check_cookie_status():
             status += f"Alter: {int(hours_old)} Stunden\n\n"
             status += "✅ Status: Gültig (kein Ablaufdatum)"
             
-            messagebox.showinfo("Cookie-Status", status)
+            safe_messagebox(messagebox.showinfo, "Cookie-Status", status)
         else:
-            messagebox.showinfo("Cookie-Status", 
+            safe_messagebox(messagebox.showinfo, "Cookie-Status", 
                 f"⚠️ Cookies gefunden ({len(cookies)} Stück)\n\n"
                 "Aber keine Session-Info vorhanden.\n"
                 "Die Cookies sollten trotzdem funktionieren.")
     
     except Exception as e:
-        messagebox.showerror("Fehler", f"Fehler beim Prüfen der Cookies:\n{str(e)}")
+        safe_messagebox(messagebox.showerror, "Fehler", f"Fehler beim Prüfen der Cookies:\n{str(e)}")
 
 # === Warte auf Download-Vollendung ===
 def wait_for_download_completion(download_dir, timeout=30):
@@ -861,7 +857,7 @@ def search_order_multi_position(order_number):
         
         # Standard Login-Prozess
         if not load_cookies(driver):
-            messagebox.showerror("Fehler", "Keine gültigen Cookies gefunden. Bitte logge dich zuerst manuell ein.")
+            safe_messagebox(messagebox.showerror, "Fehler", "Keine gültigen Cookies gefunden. Bitte logge dich zuerst manuell ein.")
             return
 
         driver.refresh()
@@ -871,7 +867,7 @@ def search_order_multi_position(order_number):
         print(f"URL nach Cookie-Login: {current_url}")
         
         if any(keyword in current_url.lower() for keyword in ["signin", "login", "auth"]):
-            messagebox.showerror("Session abgelaufen", "Deine Session ist abgelaufen. Bitte logge dich erneut ein.")
+            safe_messagebox(messagebox.showerror, "Session abgelaufen", "Deine Session ist abgelaufen. Bitte logge dich erneut ein.")
             return
 
         # Account-Auswahl handling (Deutschland)
@@ -955,21 +951,21 @@ def search_order_multi_position(order_number):
             
             no_results = driver.find_elements(By.CSS_SELECTOR, "div.sc-no-results-message")
             if no_results:
-                messagebox.showwarning("Nicht gefunden", f"Bestellung {order_number} wurde nicht gefunden.")
+                safe_messagebox(messagebox.showwarning, "Nicht gefunden", f"Bestellung {order_number} wurde nicht gefunden.")
                 return
             
             # Erkenne alle Positionen
             positions = find_order_positions(driver)
             
             if not positions:
-                messagebox.showwarning("Keine Positionen", "Keine Bestellpositionen gefunden.")
+                safe_messagebox(messagebox.showwarning, "Keine Positionen", "Keine Bestellpositionen gefunden.")
                 return
             
             # Zeige Übersicht der gefundenen Positionen
             customizable_positions = [p for p in positions if p['has_customization']]
             
             if not customizable_positions:
-                messagebox.showinfo("Keine Anpassungen", 
+                safe_messagebox(messagebox.showinfo, "Keine Anpassungen", 
                     f"Bestellung {order_number} hat {len(positions)} Position(en), "
                     "aber keine davon hat Anpassungsinformationen.")
                 return
@@ -1033,7 +1029,7 @@ def search_order_multi_position(order_number):
             final_message += f"Gesamtpositionen: {len(positions)}\n\n"
             final_message += "Die TIFF-Dateien befinden sich im 'amazon_order_downloads' Ordner."
             
-            messagebox.showinfo("Verarbeitung abgeschlossen", final_message)
+            safe_messagebox(messagebox.showinfo, "Verarbeitung abgeschlossen", final_message)
             
             # Öffne den Download-Ordner
             try:
@@ -1042,11 +1038,11 @@ def search_order_multi_position(order_number):
                 pass
                 
         except Exception as e:
-            messagebox.showwarning("Nicht gefunden", 
+            safe_messagebox(messagebox.showwarning, "Nicht gefunden", 
                 f"Bestellung {order_number} wurde nicht gefunden oder die Seite hat zu lange geladen.")
             
     except Exception as e:
-        messagebox.showerror("Fehler", f"Multi-Position-Prozess fehlgeschlagen: {e}")
+        safe_messagebox(messagebox.showerror, "Fehler", f"Multi-Position-Prozess fehlgeschlagen: {e}")
         print(f"Kritischer Fehler: {str(e)}")
         
     finally:
@@ -1242,7 +1238,7 @@ def extract_dimensions_and_check_text(extract_dir):
         # Suche nach JSON-Dateien
         json_files = [f for f in os.listdir(extract_dir) if f.lower().endswith('.json')]
         if not json_files:
-            messagebox.showerror("Fehler", "Keine JSON-Datei im Download gefunden")
+            safe_messagebox(messagebox.showerror, "Fehler", "Keine JSON-Datei im Download gefunden")
             return None
         
         json_path = os.path.join(extract_dir, json_files[0])
@@ -1259,7 +1255,7 @@ def extract_dimensions_and_check_text(extract_dir):
                     if area.get('customizationType') == "TextPrinting" and area.get('label') == "Verkäufer nachricht":
                         if area.get('text', '').strip():
                             seller_message = area['text'].strip()
-                            messagebox.showinfo(
+                            safe_messagebox(messagebox.showinfo, 
                                 "Verkäuferhinweis", 
                                 f"Nachricht vom Verkäufer:\n\n{seller_message}"
                             )
@@ -1305,7 +1301,7 @@ def extract_dimensions_and_check_text(extract_dir):
                     break
         
         if not required_dimensions:
-            messagebox.showerror(
+            safe_messagebox(messagebox.showerror, 
                 "Fehler", 
                 "Konnte Druckdimensionen nicht ermitteln.\n"
                 "Die Verarbeitung wird abgebrochen."
@@ -1327,7 +1323,7 @@ def extract_dimensions_and_check_text(extract_dir):
                         rec_text += f"   Verhältnis: {rec_specs['width']/rec_specs['height']:.4f}\n"
                         rec_text += f"   Abweichung: {deviation:.4f}\n\n"
                     
-                    messagebox.showinfo("Empfehlungen", rec_text)
+                    safe_messagebox(messagebox.showinfo, "Empfehlungen", rec_text)
             
             return None  # Abbruch der Verarbeitung
         
@@ -1338,7 +1334,7 @@ def extract_dimensions_and_check_text(extract_dir):
         return required_dimensions
         
     except Exception as e:
-        messagebox.showerror("Fehler", f"JSON-Verarbeitung fehlgeschlagen: {str(e)}")
+        safe_messagebox(messagebox.showerror, "Fehler", f"JSON-Verarbeitung fehlgeschlagen: {str(e)}")
         return None
 
 def check_and_correct_aspect_ratio(tiff_path, target_ratio, tolerance=0.01):
@@ -1412,7 +1408,7 @@ def process_files_to_tiff(extract_dir, order_number):
                 break
         
         if not svg_file:
-            messagebox.showerror("Fehler", "Keine SVG-Datei gefunden")
+            safe_messagebox(messagebox.showerror, "Fehler", "Keine SVG-Datei gefunden")
             return None
         
         # 2. NEUE LOGIK: Extrahiere korrekten Bildnamen aus JSON
@@ -1433,7 +1429,7 @@ def process_files_to_tiff(extract_dir, order_number):
                         image_files.append(os.path.join(root, file))
             
             if not image_files:
-                messagebox.showerror("Fehler", "Keine Bilddateien gefunden")
+                safe_messagebox(messagebox.showerror, "Fehler", "Keine Bilddateien gefunden")
                 return None
             
             target_image_file = max(image_files, key=lambda f: os.path.getsize(f))
@@ -1460,12 +1456,12 @@ def process_files_to_tiff(extract_dir, order_number):
         if dimensions and 'ratio' in dimensions:
             print("Führe Verhältniskontrolle durch...")
             if not check_and_correct_aspect_ratio(output_path, dimensions['ratio']):
-                messagebox.showwarning("Warnung", "Bildverhältnis konnte nicht perfekt korrigiert werden")
+                safe_messagebox(messagebox.showwarning, "Warnung", "Bildverhältnis konnte nicht perfekt korrigiert werden")
         
         return output_path
         
     except Exception as e:
-        messagebox.showerror("Fehler", f"Verarbeitung fehlgeschlagen: {str(e)}")
+        safe_messagebox(messagebox.showerror, "Fehler", f"Verarbeitung fehlgeschlagen: {str(e)}")
         return None
 
 def embed_image_in_svg(image_path, svg_path):
@@ -1517,7 +1513,7 @@ def embed_image_in_svg(image_path, svg_path):
 
     except Exception as e:
         print(f"Fehler bei der Bildeinbettung: {e}")
-        messagebox.showerror("Fehler", f"Bildeinbettung fehlgeschlagen: {str(e)}")
+        safe_messagebox(messagebox.showerror, "Fehler", f"Bildeinbettung fehlgeschlagen: {str(e)}")
         return None
 
 def convert_svg_to_tiff(svg_path, output_path):
@@ -1566,7 +1562,7 @@ def convert_svg_to_tiff(svg_path, output_path):
 
     except Exception as e:
         print(f"Fehler bei der TIFF-Konvertierung: {e}")
-        messagebox.showerror("Fehler", f"Konvertierung fehlgeschlagen: {str(e)}")
+        safe_messagebox(messagebox.showerror, "Fehler", f"Konvertierung fehlgeschlagen: {str(e)}")
         return False
 
 # === Bestellung suchen und verarbeiten ===
@@ -1578,7 +1574,7 @@ def search_order(order_number):
         
         # Cookies laden und prüfen
         if not load_cookies(driver):
-            messagebox.showerror("Fehler", "Keine gültigen Cookies gefunden. Bitte logge dich zuerst manuell ein.")
+            safe_messagebox(messagebox.showerror, "Fehler", "Keine gültigen Cookies gefunden. Bitte logge dich zuerst manuell ein.")
             return
 
         # Seite neu laden um Login zu aktivieren
@@ -1591,7 +1587,7 @@ def search_order(order_number):
         
         # Wenn wir auf Login-Seite sind, Session ist abgelaufen
         if any(keyword in current_url.lower() for keyword in ["signin", "login", "auth"]):
-            messagebox.showerror("Session abgelaufen", "Deine Session ist abgelaufen. Bitte logge dich erneut ein.")
+            safe_messagebox(messagebox.showerror, "Session abgelaufen", "Deine Session ist abgelaufen. Bitte logge dich erneut ein.")
             return
 
         # Prüfen auf Account-Auswahlfenster (Deutschland auswählen)
@@ -1690,7 +1686,7 @@ def search_order(order_number):
             # Prüfe ob "Keine Ergebnisse" Meldung vorhanden ist
             no_results = driver.find_elements(By.CSS_SELECTOR, "div.sc-no-results-message")
             if no_results:
-                messagebox.showwarning("Nicht gefunden", f"Bestellung {order_number} wurde nicht gefunden. Bitte überprüfen Sie die Bestellnummer.")
+                safe_messagebox(messagebox.showwarning, "Nicht gefunden", f"Bestellung {order_number} wurde nicht gefunden. Bitte überprüfen Sie die Bestellnummer.")
                 driver.quit()
                 return
                 
@@ -1718,10 +1714,10 @@ def search_order(order_number):
             
         except Exception as e:
             # Falls Timeout beim Finden der Elemente
-            messagebox.showwarning("Nicht gefunden", f"Bestellung {order_number} wurde nicht gefunden oder die Seite hat zu lange geladen. Bitte überprüfen Sie die Bestellnummer.")
+            safe_messagebox(messagebox.showwarning, "Nicht gefunden", f"Bestellung {order_number} wurde nicht gefunden oder die Seite hat zu lange geladen. Bitte überprüfen Sie die Bestellnummer.")
             
     except Exception as e:
-        messagebox.showerror("Fehler", f"Prozess fehlgeschlagen: {e}")
+        safe_messagebox(messagebox.showerror, "Fehler", f"Prozess fehlgeschlagen: {e}")
         print(f"Fehler aufgetreten: {str(e)}")
     finally:
         driver.quit()
@@ -1753,7 +1749,7 @@ def start_gui():
         if order_number:
             threading.Thread(target=search_order_multi_position, args=(order_number,), daemon=True).start()
         else:
-            messagebox.showwarning("Hinweis", "Bitte eine Bestellnummer eingeben.")
+            safe_messagebox(messagebox.showwarning, "Hinweis", "Bitte eine Bestellnummer eingeben.")
 
     def on_barcode_input(event):
         # Der Barcode-Scanner sendet die Daten + Enter
